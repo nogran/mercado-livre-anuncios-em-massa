@@ -3,10 +3,12 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Open Source](https://img.shields.io/badge/Open%20Source-%E2%99%A5-red.svg)](https://github.com)
+[![Open Source](https://img.shields.io/badge/Open%20Source-%E2%99%A5-red.svg)](https://github.com/nogran/mercado-livre-anuncios-em-massa)
 
 > [!NOTE]
 > **Aviso de Projeto Independente:** Este é um software comunitário de código aberto mantido por desenvolvedores independentes. Não é uma ferramenta oficial e não possui qualquer afiliação, endosso ou vínculo com o Mercado Livre ou com a MercadoLibre Inc.
+>
+> *English summary:* Decoupled, stateless open-source engine and FastAPI server to generate, populate, and validate official Mercado Libre bulk listing Excel spreadsheets (`.xlsx`).
 
 Ferramenta desacoplada e API FastAPI para **preenchimento automático da planilha oficial do Anunciador em Massa do Mercado Livre**.
 
@@ -29,8 +31,7 @@ Preencher manualmente centenas de produtos, variações (cores, tamanhos, voltag
 - **Preenchimento Cirúrgico em XML (OpenXML):** Manipula o `.xlsx` internamente via stream ZIP/XML, sem o risco de corromper abas ocultas (`extra info`, `Ajuda`), fórmulas de cálculo automático ou listas de validação de dados.
 - **Formatação Confiável de EAN/GTIN:** Utiliza armazenamento literal (`inlineStr`), garantindo que códigos de barras numéricos não percam os zeros à esquerda e nem virem notação científica (ex: `7.89E+12`).
 - **Upload Automatizado de Imagens:** Módulo de integração com a API de Fotos do Mercado Livre (`/pictures/items/upload`) para subir fotos locais e gerar URLs HTTPS seguras no formato exato que a planilha exige.
-- **Validação Pré-Upload:** Detecta limites de caracteres de títulos (máximo de 60 caracteres), preços mínimos e dados obrigatórios antes de você enviar a planilha para o Mercado Livre.
-- **Suporte a Modificar Anúncios ("Modificar com Excel"):** Preparado para ler planilhas de anúncios ativos e atualizar preços, estoques e fichas técnicas em massa.
+- **Validação Pré-Upload:** Inspeciona limites de caracteres de títulos (máximo de 60 caracteres), preços mínimos e dados obrigatórios antes de você enviar a planilha para o Mercado Livre.
 - **API FastAPI e Interface Swagger:** Endpoints leves e sem estado (stateless) com documentação interativa em `/docs`, facilitando a integração com ERPs (Bling, Tiny), scripts próprios ou e-commerces.
 
 ---
@@ -39,7 +40,7 @@ Preencher manualmente centenas de produtos, variações (cores, tamanhos, voltag
 
 - [x] **Fase 1 — Camisetas e Regatas (Vestuário):**
   - Grade de tamanhos e variações de cores na mesma família de anúncio.
-  - Vínculo com Guia de Tamanhos oficial.
+  - Vínculo com Guia de Tamanhos oficial (aba 4).
   - Validação estrita de colunas e atributos de moda.
 - [ ] **Fase 2 — Sistema Dinâmico de Perfis de Categoria:**
   - Descoberta automática de colunas, cabeçalhos e listas de opções de qualquer planilha baixada do Mercado Livre.
@@ -75,7 +76,7 @@ flowchart LR
 
 ### 1. Clonar o repositório
 ```bash
-git clone https://github.com/SEU-USUARIO/mercado-livre-anuncios-em-massa.git
+git clone https://github.com/nogran/mercado-livre-anuncios-em-massa.git
 cd mercado-livre-anuncios-em-massa
 ```
 
@@ -108,11 +109,18 @@ Abra seu navegador em [http://localhost:8000/docs](http://localhost:8000/docs) p
 
 | Método | Rota | Descrição |
 |---|---|---|
+| `GET` | `/` | Identificação e status da API. |
 | `POST` | `/v1/templates/inspect` | Inspeciona um `.xlsx` do Mercado Livre e retorna colunas, opções e prazo de validade. |
-| `POST` | `/v1/workbooks/validate` | Valida uma lista de produtos contra as regras da planilha sem gerar o arquivo. |
-| `POST` | `/v1/workbooks/fill` | Recebe a planilha vazia + dados dos produtos e devolve o `.xlsx` preenchido para download. |
-| `POST` | `/v1/workbooks/parse` | Lê uma planilha preenchida ou relatório de retorno do Mercado Livre e extrai os dados em JSON. |
+| `POST` | `/v1/workbooks/fill` | Recebe a planilha vazia + dados dos produtos em JSON e devolve o `.xlsx` preenchido para download. |
 | `POST` | `/v1/photos/upload` | Faz upload de fotos para a API de imagens do Mercado Livre e retorna links HTTPS válidos. |
+
+---
+
+## 🧪 Rodando os Testes
+
+```bash
+pytest tests -v
+```
 
 ---
 
@@ -122,7 +130,7 @@ Contribuições são muito bem-vindas! Se você deseja adicionar suporte a novas
 
 1. Faça um Fork do projeto
 2. Crie uma Branch para sua feature (`git checkout -b feature/nova-categoria`)
-3. Faça o commit das alterações (`git commit -m 'feat: suporte a categoria calcados'`)
+3. Faça o commit das alterações em inglês (`git commit -m 'feat: add footwear category profile'`)
 4. Faça o push para a branch (`git push origin feature/nova-categoria`)
 5. Abra um Pull Request
 
