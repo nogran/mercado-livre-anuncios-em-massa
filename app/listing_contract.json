@@ -1,0 +1,282 @@
+{
+  "arquivo": "Anunciar-09-06-10_43_36.xlsx",
+  "sha256": "b9286e86f3fbc356d3fef650dbec8453720246618bc5d33a057697e5c70631e3",
+  "aba": "Camisetas e Regatas",
+  "primeira_linha": 8,
+  "ultima_linha_preparada": 1001,
+  "validacoes_excel": 34,
+  "prazo_modelo": "2026-10-06",
+  "prazo_fotos_texto": "2 dias para colar os URLs e enviar a planilha",
+  "opcoes_padrao": {
+    "C": ["Novo", "Usado"],
+    "E": ["Caveira", "Galáxia", "Lobo"],
+    "F": ["Lisa", "Estampa localizada", "Personalizado", "Bordado"],
+    "I": ["Feminino", "Masculino", "Meninas", "Meninos", "Bebês", "Sem gênero infantil", "Sem gênero"],
+    "P": ["Unidade", "Kit"],
+    "S": ["Premium", "Clássico"],
+    "U": ["Mercado Envios"],
+    "V": ["Por conta do comprador", "Você oferece frete grátis"],
+    "W": ["Concordo", "Não aceito"],
+    "X": ["Garantia do vendedor", "Garantia de fábrica", "Sem garantia"],
+    "Z": ["dias", "meses", "anos"],
+    "AB": ["Camiseta", "Camisa polo"],
+    "AC": ["Curta", "Longa", "3/4", "Tomara que caia", "Sem mangas"],
+    "AD": ["Lantejoulas", "Cetim", "Algodão", "Viscolycra", "Microfibra", "Tule", "Lycra", "Bambu", "Seda", "Algodão pima", "Poliéster", "Poliamida", "Lã", "Náilon", "Linho", "Jeans", "Piquet", "Viscose", "Camurça", "Cirrê", "Crepe", "Crochê", "Elastano", "Malha", "Moletom", "Renda", "Tricô"],
+    "AE": ["Não", "Sim"],
+    "AF": ["Tênis", "Golfe"],
+    "AG": ["Gabardine", "Jean"],
+    "AH": ["Algodão", "Poliéster"],
+    "AI": ["Redonda", "Polo", "Gola V", "Botões", "Gola alta", "Gola canoa"],
+    "AJ": ["Reta", "Larga", "Slim", "Oversized"],
+    "AK": ["Não", "Sim"],
+    "AL": ["Não", "Sim"]
+  },
+  "colunas": [
+    {
+      "coluna": "A",
+      "campo": "Título: informe o produto, marca, modelo e destaque as características principais \nCaso crie variações, você deve criar um título geral para todas",
+      "obrigatorio": true,
+      "instrucao": "Máximo de 60 caracteres.Depois de começar a vender, você não poderá editá-lo. Se seu produto for genérico, informe a marca verdadeira e/ou deixe claro que é \"compatível com\" outras marcas.Adicione o mesmo título caso seu anúncio tenha variações."
+    },
+    {
+      "coluna": "B",
+      "campo": "Quantidade de caracteres",
+      "obrigatorio": false,
+      "instrucao": "Máximo de 60 caracteres.Depois de começar a vender, você não poderá editá-lo. Se seu produto for genérico, informe a marca verdadeira e/ou deixe claro que é \"compatível com\" outras marcas.Adicione o mesmo título caso seu anúncio tenha variações."
+    },
+    {
+      "coluna": "C",
+      "campo": "Condição",
+      "obrigatorio": true,
+      "instrucao": "Indique a condição do produto e evite reclamações dos compradores."
+    },
+    {
+      "coluna": "D",
+      "campo": "Varia por: Nome comercial da cor",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "E",
+      "campo": "Varia por: Desenho impresso",
+      "obrigatorio": false,
+      "instrucao": "Insira cada Desenho impresso em uma nova linha."
+    },
+    {
+      "coluna": "F",
+      "campo": "Varia por: Desenho do tecido",
+      "obrigatorio": false,
+      "instrucao": "Insira cada Desenho do tecido em uma nova linha."
+    },
+    {
+      "coluna": "G",
+      "campo": "Tamanho",
+      "obrigatorio": true,
+      "instrucao": "Informe cada tamanho em uma nova linha. Este é o tamanho que vai aparecer para seu comprador e estará no guia selecionado."
+    },
+    {
+      "coluna": "H",
+      "campo": "Marca",
+      "obrigatorio": true,
+      "instrucao": "Para evitar infrações de propriedade intelectual e reclamações dos seus compradores, sempre informe aqui a marca verdadeira do produto ou \"genérico\" se não tiver marca."
+    },
+    {
+      "coluna": "I",
+      "campo": "Gênero",
+      "obrigatorio": true,
+      "instrucao": "Selecione na lista a opção que corresponde ao seu guia de tamanhos."
+    },
+    {
+      "coluna": "J",
+      "campo": "Código do guia",
+      "obrigatorio": true,
+      "instrucao": "Selecione um guia da lista ou cole o código numérico. Se precisar, confira como criar um novo guia.\n\nCertifique-se de vincular o guia correto de acordo com o tamanho e o gênero do seu produto."
+    },
+    {
+      "coluna": "K",
+      "campo": "Fotos",
+      "obrigatorio": true,
+      "instrucao": "Acesse o Gestor de fotos para conseguir os URLs. Depois, volte para esta planilha e cole-os na célula correspondente."
+    },
+    {
+      "coluna": "L",
+      "campo": "Código universal de produto",
+      "obrigatorio": true,
+      "instrucao": "O código universal é obrigatório para alguns produtos.\n\nTem entre 8 e 14 números. \nPode ser um EAN, UPC ou outro GTIN.\n\nSe o produto não tiver código, você pode selecionar um motivo da lista."
+    },
+    {
+      "coluna": "M",
+      "campo": "SKU",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "N",
+      "campo": "Estoque",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "O",
+      "campo": "Preço [R$]",
+      "obrigatorio": true,
+      "instrucao": "Caso queira criar variações, lembre-se que elas devem ter o mesmo preço.\nPreço mínimo: 8,00 em moeda local\nMáximo de 2 decimais, sem o símbolo R$."
+    },
+    {
+      "coluna": "P",
+      "campo": "Formato de venda",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "Q",
+      "campo": "Unidades por kit",
+      "obrigatorio": false,
+      "instrucao": "Digite apenas números."
+    },
+    {
+      "coluna": "R",
+      "campo": "Descrição",
+      "obrigatorio": false,
+      "instrucao": "Não inclua dados de contato como e-mails, telefones, endereços, links externos ou redes sociais. Insira somente texto, sem emojis nem formato HTML."
+    },
+    {
+      "coluna": "S",
+      "campo": "Tipo de anúncio",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "T",
+      "campo": "Tarifa de venda",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "U",
+      "campo": "Forma de envio",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "V",
+      "campo": "Custo de envio",
+      "obrigatorio": true,
+      "instrucao": "Por favor, selecione a forma de envio do seu produto. Observe que oferecer frete grátis depende da categoria e do preço."
+    },
+    {
+      "coluna": "W",
+      "campo": "Retirar pessoalmente",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "X",
+      "campo": "Tipo de garantia",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "Y",
+      "campo": "Tempo de garantia",
+      "obrigatorio": false,
+      "instrucao": "Digite apenas números."
+    },
+    {
+      "coluna": "Z",
+      "campo": "Unidade de Tempo de garantia",
+      "obrigatorio": false,
+      "instrucao": "Selecione a unidade de medida."
+    },
+    {
+      "coluna": "AA",
+      "campo": "Modelo",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AB",
+      "campo": "Tipo de roupa",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AC",
+      "campo": "Tipo de manga",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AD",
+      "campo": "Material principal",
+      "obrigatorio": true,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AE",
+      "campo": "Esportiva",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AF",
+      "campo": "Usos recomendados",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AG",
+      "campo": "Tipo de tecido",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AH",
+      "campo": "Composição",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AI",
+      "campo": "Tipo de gola",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AJ",
+      "campo": "Forma de caimento",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AK",
+      "campo": "Apta para gestação",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AL",
+      "campo": "Materiais reciclados",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AM",
+      "campo": "Resumo de erros",
+      "obrigatorio": false,
+      "instrucao": "Confira os campos obrigatórios indicados em vermelho e preencha-os para enviar sua planilha"
+    },
+    {
+      "coluna": "AN",
+      "campo": "BUYBOX_FORMULA",
+      "obrigatorio": false,
+      "instrucao": ""
+    },
+    {
+      "coluna": "AO",
+      "campo": "HIDDEN_PICTURES",
+      "obrigatorio": false,
+      "instrucao": ""
+    }
+  ]
+}
