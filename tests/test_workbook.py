@@ -243,6 +243,19 @@ def test_fill_rejects_sheet_rules_without_echoing_the_value(sample_bytes):
     assert len(output) > 0
 
 
+def test_numeric_guide_outside_the_list_is_written(sample_bytes):
+    wb = OfficialWorkbook(sample_bytes)
+    output = wb.export([completed_row(wb, J='1000002')])
+    with zipfile.ZipFile(io.BytesIO(output)) as archive:
+        sheet = archive.read(wb.profile.sheet_part).decode('utf8')
+    assert '1000002' in sheet
+
+    with pytest.raises(ValidationError) as error:
+        wb.export([completed_row(wb, J='guia fora da lista')])
+    assert str(error.value) == 'Listing row 1, column J is not an allowed option.'
+    assert 'guia fora da lista' not in str(error.value)
+
+
 def test_api_fill_rejects_incomplete_row(sample_bytes):
     client = TestClient(app)
     response = client.post(

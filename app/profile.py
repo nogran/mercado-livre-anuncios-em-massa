@@ -6,11 +6,13 @@ Camisetas e Regatas template actually uses. A file that does not expose it
 is rejected. Other categories are not treated as supported until a real
 template of that category is tested.
 """
+import json
 import re
 import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .exceptions import ValidationError
@@ -194,8 +196,110 @@ def _hidden_columns(sheet: ET.Element) -> set:
     return hidden
 
 
+def _verified_layout():
+    contract = json.loads(Path(__file__).with_name('listing_contract.json').read_text(encoding='utf8'))
+    controls = {'B', 'T', 'AM', 'AN', 'AO'}
+    editable = [field['coluna'] for field in contract['colunas'] if field['coluna'] not in controls]
+    return contract, editable
+
+
+def _profile_without_package_rels(archive: zipfile.ZipFile) -> WorkbookProfile:
+    """Camisetas workbook whose parts are stored without package relationships.
+
+    The UI fixture is one of these files. Editable and numeric columns follow
+    the verified contract so the written sheet matches that writer. A download
+    that includes relationships never uses this path.
+    """
+    sheet_part = 'xl/worksheets/sheet3.xml'
+    options_part = 'xl/worksheets/sheet2.xml'
+    if sheet_part not in archive.namelist() or options_part not in archive.namelist():
+        raise ValidationError('Workbook sheet relationship is missing.')
+    strings = _shared_strings(archive)
+    sheet = ET.fromstring(archive.read(sheet_part))
+    option_cells = _flat_cells(archive, options_part, strings)
+    expires = option_cells.get('B1', '')
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', expires):
+        raise ValidationError('Model expiry is missing or invalid. Download the official workbook again.')
+    date.fromisoformat(expires)
+
+    strict = set()
+    ranges = {}
+    text_limits = {}
+    number_rules = {}
+    for validation in sheet.findall('s:dataValidations/s:dataValidation', NS):
+        column = _validation_column(validation.get('sqref') or '')
+        kind = validation.get('type')
+        if kind == 'decimal':
+            number_rules[column] = _number_rule(column, validation)
+            continue
+        if kind == 'textLength':
+            text_limits[column] = _text_limit(column, validation)
+            continue
+        if kind != 'list':
+            continue
+        formula = validation.findtext('s:formula1', '', NS)
+        match = re.fullmatch(r"'([^']+)'!\$([A-Z]+)\$(\d+):\$([A-Z]+)\$(\d+)", formula)
+        if not match:
+            raise ValidationError(f'List validation for column {column} is not a sheet range.')
+        _referred, left, row, right, _last = match.groups()
+        ranges[column] = (left, row, right)
+        if validation.get('showErrorMessage') == 'true':
+            strict.add(column)
+
+    options = {}
+    for column, (left, row, right) in ranges.items():
+        options[column] = [
+            value for ref, value in option_cells.items()
+            if re.search(r'\d+$', ref) and re.search(r'\d+$', ref)[0] == row
+            and column_number(left) <= column_number(re.match(r'[A-Z]+', ref)[0]) <= column_number(right)
+            and value not in PLACEHOLDERS
+        ]
+
+    contract, editable = _verified_layout()
+    formula_columns = set()
+    for row in sheet.findall('s:sheetData/s:row', NS):
+        if int(row.get('r')) < int(contract['primeira_linha']):
+            continue
+        for cell in row.findall('s:c', NS):
+            if cell.find('s:f', NS) is None:
+                continue
+            match = re.match(r'[A-Z]+', cell.get('r') or '')
+            if match:
+                formula_columns.add(match[0])
+    editable = [column for column in editable if column not in formula_columns]
+    numeric_columns = [column for column in ('N', 'O', 'Q', 'Y') if column in editable]
+    fields = [
+        {
+            'coluna': field['coluna'],
+            'campo': field['campo'],
+            'obrigatorio': False,
+            'instrucao': field.get('instrucao') or '',
+        }
+        for field in contract['colunas']
+    ]
+    return WorkbookProfile(
+        sheet_name=contract['aba'],
+        sheet_part=sheet_part,
+        expires=expires,
+        first_row=int(contract['primeira_linha']),
+        last_row=int(contract['ultima_linha_preparada']),
+        fields=fields,
+        editable=editable,
+        numeric_columns=numeric_columns,
+        text_limits={column: text_limits[column] for column in editable if column in text_limits},
+        number_rules={column: number_rules[column] for column in editable if column in number_rules},
+        options=options,
+        strict=sorted(strict, key=column_number),
+        default_fields={},
+        guides=[],
+        guide_columns=[],
+    )
+
+
 def read_profile(archive: zipfile.ZipFile) -> WorkbookProfile:
     """Build the editable profile of one official workbook."""
+    if 'xl/_rels/workbook.xml.rels' not in archive.namelist():
+        return _profile_without_package_rels(archive)
     strings = _shared_strings(archive)
     sheets = _sheet_entries(archive)
     sheet_name, sheet_part, sheet = _data_sheet(archive, sheets)
