@@ -13,6 +13,7 @@ from xml.sax.saxutils import escape
 
 from .exceptions import ValidationError
 from .profile import column_number, read_profile
+from .validation import validate_rows
 
 MAX_TEMPLATE = 32 * 1024 * 1024
 
@@ -57,6 +58,8 @@ class OfficialWorkbook:
             'first_row': profile.first_row,
             'last_row': profile.last_row,
             'numeric_columns': profile.numeric_columns,
+            'text_limits': profile.text_limits,
+            'number_rules': profile.number_rules,
             'default_fields': profile.default_fields,
             'options': profile.options,
             'strict': profile.strict,
@@ -72,6 +75,7 @@ class OfficialWorkbook:
         capacity = last - first + 1
         if not 1 <= len(rows) <= capacity:
             raise ValidationError(f'The template supports between 1 and {capacity} rows per batch.')
+        validate_rows(self.profile, rows)
 
         editable = self.profile.editable
         numeric = set(self.profile.numeric_columns)

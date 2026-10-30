@@ -10,6 +10,12 @@ class ColumnField(BaseModel):
     instrucao: Optional[str] = None
 
 
+class NumberRule(BaseModel):
+    operator: str
+    low: float
+    high: Optional[float] = None
+
+
 class InspectResponse(BaseModel):
     sha256: str
     sheet: str
@@ -18,6 +24,8 @@ class InspectResponse(BaseModel):
     first_row: int
     last_row: int
     numeric_columns: List[str]
+    text_limits: Dict[str, int]
+    number_rules: Dict[str, NumberRule]
     default_fields: Dict[str, str]
     options: Dict[str, List[str]]
     strict: List[str]
