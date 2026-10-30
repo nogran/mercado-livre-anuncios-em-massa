@@ -15,6 +15,9 @@ class InspectResponse(BaseModel):
     sheet: str
     filename: str
     expires: str
+    first_row: int
+    last_row: int
+    numeric_columns: List[str]
     default_fields: Dict[str, str]
     options: Dict[str, List[str]]
     strict: List[str]

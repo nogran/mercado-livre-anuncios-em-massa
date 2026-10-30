@@ -62,7 +62,8 @@ def root():
         "version": "0.1.0",
         "status": "online",
         "docs": "/docs",
-        "supported_category": "T-shirts and Tank Tops (Apparel)"
+        "profile_source": "uploaded workbook",
+        "verified_template": "Camisetas e Regatas"
     }
 
 
@@ -79,7 +80,7 @@ async def inspect_template(
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    wb = OfficialWorkbook(contents)
+    wb = OfficialWorkbook(contents, filename=template.filename or '')
     return wb.metadata()
 
 
@@ -118,7 +119,7 @@ async def fill_workbook(
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded template file is empty.")
 
-    wb = OfficialWorkbook(contents)
+    wb = OfficialWorkbook(contents, filename=template.filename or '')
     filled_bytes = wb.export(rows)
 
     filename = "mercado-libre-bulk-listings-filled.xlsx"
