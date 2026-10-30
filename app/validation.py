@@ -31,7 +31,7 @@ def validate_rows(profile: WorkbookProfile, rows: List[Dict[str, Any]]) -> None:
             value = row.get(column)
             if _blank(value):
                 continue
-            if column in strict and str(value) not in profile.options.get(column, []):
+            if column in strict and not _accepted_option(column, value, profile):
                 raise ValidationError(f'Listing row {index}, column {column} is not an allowed option.')
             limit = profile.text_limits.get(column)
             if limit is not None and len(str(value)) > limit:
@@ -39,6 +39,16 @@ def validate_rows(profile: WorkbookProfile, rows: List[Dict[str, Any]]) -> None:
             rule = profile.number_rules.get(column)
             if rule is not None:
                 _check_number(index, column, value, rule)
+
+
+def _accepted_option(column: str, value: Any, profile: WorkbookProfile) -> bool:
+    """Column J lists sample guides. A numeric code from the seller account is still valid."""
+    if str(value) in profile.options.get(column, []):
+        return True
+    if column != 'J':
+        return False
+    code = str(value).split(' - ')[0]
+    return re.fullmatch(r'[0-9]+', code) is not None
 
 
 def _blank(value: Any) -> bool:

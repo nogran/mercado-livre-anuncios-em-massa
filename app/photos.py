@@ -7,6 +7,7 @@ import json
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
+from urllib.parse import urlsplit
 import requests
 
 from .exceptions import MarketplaceCredentialError, MarketplaceUploadError
@@ -18,6 +19,25 @@ MIME_EXTENSIONS = {
     'image/jpeg': 'jpg',
     'image/webp': 'webp'
 }
+_ml_transport = None
+
+
+def bind_ml_transport(transport):
+    """Install the Mercado Libre caller used when upload_picture receives none.
+
+    Tests bind a fake for the in-process client. Production leaves this unset.
+    """
+    global _ml_transport
+    previous = _ml_transport
+    _ml_transport = transport
+    return previous
+
+
+def _https_url(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    parts = urlsplit(value.strip())
+    return parts.scheme == 'https' and bool(parts.hostname)
 
 
 def _clean_error_detail(body: bytes) -> str:
@@ -70,7 +90,7 @@ def upload_picture(
     extension = MIME_EXTENSIONS[mime]
 
     try:
-        requester = transport or requests.post
+        requester = transport or _ml_transport or requests.post
         response = requester(
             UPLOAD_URL,
             headers={'Authorization': f'Bearer {token}'},
@@ -106,13 +126,19 @@ def upload_picture(
             )
 
         payload = json.loads(body_bytes)
-        options = payload.get('variations', [])
-        picture = next((p for p in options if p.get('size') == payload.get('max_size')), None)
-        if not picture:
-            picture = next((p for p in options if p.get('secure_url')), None)
-
-        if not picture or not picture.get('secure_url'):
-            raise MarketplaceUploadError('Mercado Libre did not return a secure HTTPS URL for the image.', 'MISSING_SECURE_URL')
+        options = payload.get('variations') or []
+        picture = next(
+            (
+                item for item in options
+                if isinstance(item, dict) and item.get('size') == payload.get('max_size')
+            ),
+            None,
+        )
+        if picture is None or not _https_url(picture.get('secure_url')):
+            raise MarketplaceUploadError(
+                'Mercado Libre did not return a secure HTTPS URL for the original image.',
+                'MISSING_SECURE_URL',
+            )
 
         now_utc = datetime.now(timezone.utc)
         expires_utc = now_utc + timedelta(days=2)
@@ -128,5 +154,5 @@ def upload_picture(
         raise
     except requests.RequestException as e:
         raise MarketplaceUploadError(f'Network error while connecting to Mercado Libre: {str(e)}', 'NETWORK_ERROR') from e
-    except (ValueError, KeyError, TypeError) as e:
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
         raise MarketplaceUploadError(f'Unexpected response payload from Mercado Libre: {str(e)}', 'INVALID_RESPONSE') from e
