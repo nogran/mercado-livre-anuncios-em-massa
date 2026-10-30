@@ -38,6 +38,8 @@ class WorkbookProfile:
     fields: List[Dict[str, Any]]
     editable: List[str]
     numeric_columns: List[str]
+    text_limits: Dict[str, int]
+    number_rules: Dict[str, Dict[str, Any]]
     options: Dict[str, List[str]]
     strict: List[str]
     default_fields: Dict[str, str]
@@ -155,6 +157,32 @@ def _marker_row(cells_by_row: Dict[int, Dict[str, str]], first_row: int) -> int:
     return winners[0]
 
 
+def _bound(column: str, raw: str) -> float:
+    if not re.fullmatch(r'-?\d+(?:\.\d+)?', raw or ''):
+        raise ValidationError(f'Column {column} has a non-numeric validation bound.')
+    return float(raw)
+
+
+def _text_limit(column: str, validation: ET.Element) -> int:
+    if validation.get('operator') != 'lessThanOrEqual':
+        raise ValidationError(f'Unsupported text length operator on column {column}.')
+    limit = _bound(column, validation.findtext('s:formula1', '', NS))
+    if limit < 0 or limit != int(limit):
+        raise ValidationError(f'Column {column} has an invalid text length.')
+    return int(limit)
+
+
+def _number_rule(column: str, validation: ET.Element) -> Dict[str, Any]:
+    operator = validation.get('operator')
+    low = _bound(column, validation.findtext('s:formula1', '', NS))
+    if operator == 'greaterThan':
+        return {'operator': operator, 'low': low, 'high': None}
+    if operator == 'between':
+        high = _bound(column, validation.findtext('s:formula2', '', NS))
+        return {'operator': operator, 'low': low, 'high': high}
+    raise ValidationError(f'Unsupported number operator on column {column}.')
+
+
 def _hidden_columns(sheet: ET.Element) -> set:
     hidden = set()
     for column in sheet.findall('s:cols/s:col', NS):
@@ -177,6 +205,8 @@ def read_profile(archive: zipfile.ZipFile) -> WorkbookProfile:
     numeric = set()
     strict = set()
     ranges = {}
+    text_limits = {}
+    number_rules = {}
     for validation in sheet.findall('s:dataValidations/s:dataValidation', NS):
         sqref = validation.get('sqref') or ''
         column = _validation_column(sqref)
@@ -185,6 +215,10 @@ def read_profile(archive: zipfile.ZipFile) -> WorkbookProfile:
         kind = validation.get('type')
         if kind == 'decimal':
             numeric.add(column)
+            number_rules[column] = _number_rule(column, validation)
+            continue
+        if kind == 'textLength':
+            text_limits[column] = _text_limit(column, validation)
             continue
         if kind != 'list':
             continue
@@ -273,6 +307,8 @@ def read_profile(archive: zipfile.ZipFile) -> WorkbookProfile:
         if field['coluna'] not in formula_columns and column_number(field['coluna']) not in hidden
     ]
     numeric_columns = [letter for letter in editable if letter in numeric]
+    text_limits = {letter: text_limits[letter] for letter in editable if letter in text_limits}
+    number_rules = {letter: number_rules[letter] for letter in editable if letter in number_rules}
 
     prefilled = cells_by_row.get(first_row, {})
     default_fields = {}
@@ -301,6 +337,8 @@ def read_profile(archive: zipfile.ZipFile) -> WorkbookProfile:
         fields=fields,
         editable=editable,
         numeric_columns=numeric_columns,
+        text_limits=text_limits,
+        number_rules=number_rules,
         options=options,
         strict=sorted(strict, key=column_number),
         default_fields=default_fields,
