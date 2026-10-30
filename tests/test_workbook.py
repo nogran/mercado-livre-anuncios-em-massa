@@ -1,9 +1,9 @@
 """Unit tests for the OfficialWorkbook engine and the FastAPI server endpoints.
 
-The profile is read from the workbook. These tests only use Camisetas e
-Regatas downloads. The 09-06 file is the audited contract; the 09-14 file
-is a later download of the same category and must not be forced through
-that frozen column map.
+The fixtures are Camisetas e Regatas workbooks with the same structure as a
+Mercado Libre download. Account-specific guide labels are generic. The 09-06
+file matches the audited column contract; the 09-14 file is a later download
+of the same category.
 """
 import io
 import json
@@ -17,8 +17,9 @@ from app.exceptions import ValidationError
 from app.workbook import OfficialWorkbook
 from app.server import app
 
-LOCAL_SAMPLE = Path(__file__).resolve().parents[2] / 'nogran-ml-excel' / 'Anunciar-09-06-10_43_36.xlsx'
-LATER_SAMPLE = Path(__file__).resolve().parents[2] / 'nogran-ml-excel' / 'Anunciar-09-14-12_08_33.xlsx'
+FIXTURES = Path(__file__).resolve().parent / 'fixtures'
+LOCAL_SAMPLE = FIXTURES / 'camiseta-09-06.xlsx'
+LATER_SAMPLE = FIXTURES / 'camiseta-09-14.xlsx'
 CONTRACT = json.loads((Path(__file__).resolve().parents[1] / 'app' / 'listing_contract.json').read_text(encoding='utf8'))
 NON_EDITABLE = {'B', 'T', 'AM', 'AN', 'AO'}
 
@@ -61,8 +62,6 @@ def completed_row(wb, **overrides):
 
 @pytest.fixture
 def sample_bytes():
-    if not LOCAL_SAMPLE.exists():
-        pytest.skip(f"Test template sample not found at {LOCAL_SAMPLE}")
     return LOCAL_SAMPLE.read_bytes()
 
 
@@ -83,7 +82,9 @@ def test_official_workbook_inspect(sample_bytes):
 
 def test_profile_matches_verified_camiseta_contract(sample_bytes):
     wb = OfficialWorkbook(sample_bytes)
-    assert wb.sha256 == CONTRACT['sha256']
+    assert wb.sha256 != CONTRACT['sha256']
+    assert {guide['code'] for guide in wb.profile.guides} == {'1000001'}
+    assert {guide['name'] for guide in wb.profile.guides} == {'Guia 1'}
     assert wb.profile.sheet_name == CONTRACT['aba']
     assert wb.profile.sheet_part == 'xl/worksheets/sheet3.xml'
     assert wb.profile.first_row == CONTRACT['primeira_linha']
@@ -118,8 +119,6 @@ def test_export_keeps_formula_columns_and_writes_numbers(sample_bytes):
 
 @pytest.fixture
 def later_bytes():
-    if not LATER_SAMPLE.exists():
-        pytest.skip(f"Later camiseta template not found at {LATER_SAMPLE}")
     return LATER_SAMPLE.read_bytes()
 
 
@@ -129,6 +128,8 @@ def test_later_camiseta_template_uses_its_own_profile(later_bytes):
     frozen = {field['coluna']: field['campo'] for field in CONTRACT['colunas']}
     assert wb.profile.sheet_name == 'Camisetas e Regatas'
     assert wb.sha256 != CONTRACT['sha256']
+    assert {guide['code'] for guide in wb.profile.guides} == {'1000001'}
+    assert {guide['name'] for guide in wb.profile.guides} == {'Guia 1'}
     assert wb.profile.expires == '2026-10-14'
     assert labels['Q'] == 'Quantidade de camisetas'
     assert labels['Q'] != frozen['Q']
