@@ -22,6 +22,7 @@ LOCAL_SAMPLE = FIXTURES / 'camiseta-09-06.xlsx'
 LATER_SAMPLE = FIXTURES / 'camiseta-09-14.xlsx'
 CONTRACT = json.loads((Path(__file__).resolve().parents[1] / 'app' / 'listing_contract.json').read_text(encoding='utf8'))
 NON_EDITABLE = {'B', 'T', 'AM', 'AN', 'AO'}
+OUTSIDE_GUIDE = '1000002'
 
 
 def _sample_number(rule):
@@ -56,6 +57,10 @@ def completed_row(wb, **overrides):
             row[column] = _sample_number(profile.number_rules[column])
         else:
             row[column] = 'item'
+    # Seller rules: a price Mercado Libre accepts, a GTIN reason from the
+    # list and a guide code outside the guide sheet, which skips the
+    # gender and size match.
+    row.update({'O': 49.9, 'L': profile.options['L'][0], 'J': OUTSIDE_GUIDE})
     row.update(overrides)
     return row
 

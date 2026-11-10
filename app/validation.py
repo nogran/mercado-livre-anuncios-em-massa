@@ -7,6 +7,7 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
+from . import listing_rules
 from .exceptions import ValidationError
 from .profile import WorkbookProfile
 
@@ -32,15 +33,23 @@ def row_errors(profile: WorkbookProfile, rows: List[Dict[str, Any]]) -> List[Dic
         if field['obrigatorio'] and field['coluna'] in editable
     }
     strict = set(profile.strict)
+    seller_rules = listing_rules.applies(profile)
+    order = {column: position for position, column in enumerate(profile.editable)}
     errors: List[Dict[str, Any]] = []
     for index, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
             errors.append(_error(index, None, f'Listing row {index} must be an object.'))
             continue
+        found: Dict[str, str] = {}
         for column in profile.editable:
             message = _column_error(profile, strict, required, index, column, row.get(column))
             if message:
-                errors.append(_error(index, column, message))
+                found[column] = message
+        if seller_rules:
+            for column, message in listing_rules.check(profile, index, row):
+                found.setdefault(column, message)
+        for column in sorted(found, key=lambda col: order.get(col, len(order))):
+            errors.append(_error(index, column, found[column]))
     return errors
 
 
