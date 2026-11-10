@@ -265,3 +265,45 @@ def test_api_fill_rejects_incomplete_row(sample_bytes):
     )
     assert response.status_code == 422
     assert response.json()["detail"] == "Listing row 1, column A is required."
+
+
+def test_validation_reports_every_problem_in_order(sample_bytes):
+    wb = OfficialWorkbook(sample_bytes)
+    first = completed_row(wb, A='   ', O=0)
+    second = completed_row(wb, C='Quase novo')
+    with pytest.raises(ValidationError) as error:
+        wb.export([first, second])
+    assert str(error.value) == 'Listing row 1, column A is required.'
+    assert error.value.errors == [
+        {'row': 1, 'column': 'A', 'message': 'Listing row 1, column A is required.'},
+        {'row': 1, 'column': 'O', 'message': 'Listing row 1, column O must be greater than 0.'},
+        {'row': 2, 'column': 'C', 'message': 'Listing row 2, column C is not an allowed option.'},
+    ]
+    assert 'Quase novo' not in json.dumps(error.value.errors)
+
+
+def test_api_fill_returns_every_row_error(sample_bytes):
+    wb = OfficialWorkbook(sample_bytes)
+    rows = [completed_row(wb, O=0), 'not an object']
+    response = TestClient(app).post(
+        "/v1/workbooks/fill",
+        files={"template": ("template.xlsx", sample_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        data={"payload": json.dumps(rows)}
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["detail"] == "Listing row 1, column O must be greater than 0."
+    assert body["code"] == "VALIDATION_ERROR"
+    assert body["errors"] == [
+        {"row": 1, "column": "O", "message": "Listing row 1, column O must be greater than 0."},
+        {"row": 2, "column": None, "message": "Listing row 2 must be an object."},
+    ]
+
+
+def test_template_errors_keep_an_empty_error_list():
+    response = TestClient(app).post(
+        "/v1/templates/inspect",
+        files={"template": ("template.xlsx", b"not a zip", "application/octet-stream")},
+    )
+    assert response.status_code == 422
+    assert response.json()["errors"] == []

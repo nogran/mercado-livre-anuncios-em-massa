@@ -1,4 +1,5 @@
 """Domain exceptions for workbook validation and Mercado Libre marketplace operations."""
+from typing import Any, Dict, List, Optional
 
 
 class WorkbookError(Exception):
@@ -7,8 +8,15 @@ class WorkbookError(Exception):
 
 
 class ValidationError(WorkbookError):
-    """Raised when workbook structure, rules, or listing payload are invalid."""
-    pass
+    """Raised when workbook structure, rules, or listing payload are invalid.
+
+    ``errors`` lists every row problem found, as ``{"row", "column", "message"}``.
+    The exception text is the first message, so callers that read only the
+    text keep working.
+    """
+    def __init__(self, message: str, errors: Optional[List[Dict[str, Any]]] = None):
+        super().__init__(message)
+        self.errors = list(errors or [])
 
 
 class MarketplaceError(Exception):
