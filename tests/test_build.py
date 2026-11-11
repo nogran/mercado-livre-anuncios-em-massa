@@ -221,3 +221,21 @@ def test_bad_payload_is_400(template):
     response = TestClient(app).post(
         '/v1/listings/build', files={'template': ('template.xlsx', template, XLSX)}, data={'payload': '{'})
     assert response.status_code == 400
+
+
+EXAMPLES = LOCAL_SAMPLE.parents[2] / 'examples'
+
+
+def test_readme_examples_stay_valid(template, wb, ml):
+    fill = json.loads((EXAMPLES / 'fill-camiseta.json').read_text(encoding='utf8'))
+    assert wb.export(fill['rows'])
+
+    payload = (EXAMPLES / 'build-camiseta.json').read_text(encoding='utf8')
+    images = [('frente.jpg', JPEG, 'image/jpeg'), ('costas.jpg', JPEG + b'2', 'image/jpeg')]
+    files = [('template', ('template.xlsx', template, XLSX))]
+    files += [('images', (name, raw, mime)) for name, raw, mime in images]
+    response = TestClient(app).post('/v1/listings/build', files=files, data={'payload': payload},
+                                    headers={'Authorization': 'Bearer fixture-token'})
+    assert response.status_code == 200, response.text
+    assert response.headers['x-uploaded-photos'] == '2'
+    assert len(ml.calls) == 2
