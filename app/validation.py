@@ -5,8 +5,9 @@ value, so a rejection cannot echo account-specific cell text.
 """
 import math
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from . import listing_rules
 from .exceptions import ValidationError
 from .profile import WorkbookProfile
 
@@ -14,31 +15,63 @@ _NUMBER = re.compile(r'-?\d+(?:\.\d+)?')
 
 
 def validate_rows(profile: WorkbookProfile, rows: List[Dict[str, Any]]) -> None:
-    """Reject listing rows that break required markers or data validations."""
+    """Reject listing rows that break required markers or data validations.
+
+    Every row and column is checked. The raised error carries all problems,
+    one per column at most, in row and column order.
+    """
+    errors = row_errors(profile, rows)
+    if errors:
+        raise ValidationError(errors[0]['message'], errors=errors)
+
+
+def row_errors(profile: WorkbookProfile, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return every problem as ``{"row", "column", "message"}``."""
     editable = set(profile.editable)
-    required = [
+    required = {
         field['coluna'] for field in profile.fields
         if field['obrigatorio'] and field['coluna'] in editable
-    ]
+    }
     strict = set(profile.strict)
+    seller_rules = listing_rules.applies(profile)
+    order = {column: position for position, column in enumerate(profile.editable)}
+    errors: List[Dict[str, Any]] = []
     for index, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
-            raise ValidationError(f'Listing row {index} must be an object.')
-        for column in required:
-            if _blank(row.get(column)):
-                raise ValidationError(f'Listing row {index}, column {column} is required.')
+            errors.append(_error(index, None, f'Listing row {index} must be an object.'))
+            continue
+        found: Dict[str, str] = {}
         for column in profile.editable:
-            value = row.get(column)
-            if _blank(value):
-                continue
-            if column in strict and not _accepted_option(column, value, profile):
-                raise ValidationError(f'Listing row {index}, column {column} is not an allowed option.')
-            limit = profile.text_limits.get(column)
-            if limit is not None and len(str(value)) > limit:
-                raise ValidationError(f'Listing row {index}, column {column} exceeds {limit} characters.')
-            rule = profile.number_rules.get(column)
-            if rule is not None:
-                _check_number(index, column, value, rule)
+            message = _column_error(profile, strict, required, index, column, row.get(column))
+            if message:
+                found[column] = message
+        if seller_rules:
+            for column, message in listing_rules.check(profile, index, row):
+                found.setdefault(column, message)
+        for column in sorted(found, key=lambda col: order.get(col, len(order))):
+            errors.append(_error(index, column, found[column]))
+    return errors
+
+
+def _column_error(profile, strict, required, index: int, column: str, value: Any) -> Optional[str]:
+    if _blank(value):
+        return f'Listing row {index}, column {column} is required.' if column in required else None
+    if column in strict and not _accepted_option(column, value, profile):
+        return f'Listing row {index}, column {column} is not an allowed option.'
+    limit = profile.text_limits.get(column)
+    if limit is not None and len(str(value)) > limit:
+        return f'Listing row {index}, column {column} exceeds {limit} characters.'
+    rule = profile.number_rules.get(column)
+    if rule is not None:
+        try:
+            _check_number(index, column, value, rule)
+        except ValidationError as error:
+            return str(error)
+    return None
+
+
+def _error(row: int, column: Optional[str], message: str) -> Dict[str, Any]:
+    return {'row': row, 'column': column, 'message': message}
 
 
 def _accepted_option(column: str, value: Any, profile: WorkbookProfile) -> bool:

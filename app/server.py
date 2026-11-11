@@ -34,7 +34,7 @@ app.add_middleware(
 async def handle_validation_error(request, exc: ValidationError):
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": str(exc), "code": "VALIDATION_ERROR"}
+        content={"detail": str(exc), "code": "VALIDATION_ERROR", "errors": exc.errors}
     )
 
 

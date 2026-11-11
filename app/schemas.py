@@ -48,6 +48,13 @@ class PhotoUploadResponse(BaseModel):
     expires_at: str
 
 
+class RowError(BaseModel):
+    row: Optional[int] = None
+    column: Optional[str] = None
+    message: str
+
+
 class ErrorResponse(BaseModel):
     detail: str
     code: Optional[str] = None
+    errors: List[RowError] = []
