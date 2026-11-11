@@ -34,3 +34,14 @@ class MarketplaceCredentialError(MarketplaceError):
 class MarketplaceUploadError(MarketplaceError):
     """Raised when uploading pictures or files to Mercado Libre fails."""
     pass
+
+
+class RequestRejected(Exception):
+    """Raised before any upload when the request itself cannot be served.
+
+    ``status`` is the HTTP status the server answers with (400, 401, 413, 415).
+    """
+    def __init__(self, message: str, status: int, code: str):
+        super().__init__(message)
+        self.status = status
+        self.code = code

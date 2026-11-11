@@ -1,12 +1,13 @@
 """Decoupled FastAPI server for populating Mercado Libre bulk listing workbooks."""
 import io
 import json
-from typing import Optional
+from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from .exceptions import ValidationError, MarketplaceCredentialError, MarketplaceUploadError
+from .build import MAX_IMAGE, Image, PhotoUploadFailed, build
+from .exceptions import ValidationError, MarketplaceCredentialError, MarketplaceUploadError, RequestRejected
 from .workbook import OfficialWorkbook
 from .photos import upload_picture
 from .schemas import InspectResponse, PhotoUploadResponse, ErrorResponse
@@ -51,6 +52,19 @@ async def handle_upload_error(request, exc: MarketplaceUploadError):
     return JSONResponse(
         status_code=status.HTTP_502_BAD_GATEWAY,
         content={"detail": str(exc), "code": exc.code}
+    )
+
+
+@app.exception_handler(RequestRejected)
+async def handle_rejected_request(request, exc: RequestRejected):
+    return JSONResponse(status_code=exc.status, content={"detail": str(exc), "code": exc.code})
+
+
+@app.exception_handler(PhotoUploadFailed)
+async def handle_partial_upload(request, exc: PhotoUploadFailed):
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": str(exc), "code": exc.code, "uploaded": exc.uploaded}
     )
 
 
@@ -157,3 +171,59 @@ async def upload_photo(
         mime=content_type
     )
     return result
+
+
+@app.post(
+    "/v1/listings/build",
+    summary="Template + rows + images → filled workbook in one call",
+    description=(
+        "Receives the empty official .xlsx template, the listing rows and the image files. "
+        "Each row may name its images in \"photos\" instead of sending column K. "
+        "Every row is checked before any upload; then each image is uploaded once, column K "
+        "gets the HTTPS URLs in the listed order, and the filled .xlsx is returned."
+    ),
+    responses={
+        200: {"content": {XLSX_MIME: {}}, "description": "Filled workbook, ready for manual upload."},
+        400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}, 413: {"model": ErrorResponse},
+        415: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 502: {"model": ErrorResponse},
+    }
+)
+async def build_listings(
+    template: UploadFile = File(..., description="Empty official template file (.xlsx) downloaded from Mercado Libre"),
+    payload: str = Form(
+        ...,
+        description='JSON rows, e.g. {"rows": [{"A": "Camiseta Preta Algodao", "D": "Preto", "G": "M", '
+                    '"O": 49.90, "N": 10, "photos": ["frente.jpg", "costas.jpg"]}]}'
+    ),
+    images: List[UploadFile] = File(default=[], description="Image files named in the rows' photos (PNG, JPEG or WEBP)"),
+    authorization: Optional[str] = Header(None, description="'Bearer <token>'; required only when a row has photos")
+):
+    try:
+        data = json.loads(payload)
+        rows = data if isinstance(data, list) else data.get("rows", [])
+    except (json.JSONDecodeError, AttributeError):
+        raise HTTPException(
+            status_code=400,
+            detail="The payload field must be a valid JSON string containing an array of row objects."
+        )
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=400, detail="No listing rows provided for population.")
+
+    contents = await template.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded template file is empty.")
+
+    files = []
+    for image in images:
+        raw = await image.read(MAX_IMAGE + 1)
+        files.append(Image(image.filename or '', raw, image.content_type or ''))
+
+    filled, uploaded = build(contents, template.filename or '', rows, files, authorization)
+    return StreamingResponse(
+        io.BytesIO(filled),
+        media_type=XLSX_MIME,
+        headers={
+            "Content-Disposition": 'attachment; filename="mercado-libre-bulk-listings-filled.xlsx"',
+            "X-Uploaded-Photos": str(uploaded),
+        }
+    )
