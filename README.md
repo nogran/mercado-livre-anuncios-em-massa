@@ -113,6 +113,86 @@ Abra seu navegador em [http://localhost:8000/docs](http://localhost:8000/docs) p
 | `POST` | `/v1/templates/inspect` | Inspeciona um `.xlsx` do Mercado Livre e retorna colunas, opções e prazo de validade. |
 | `POST` | `/v1/workbooks/fill` | Recebe a planilha vazia + dados dos produtos em JSON e devolve o `.xlsx` preenchido para download. |
 | `POST` | `/v1/photos/upload` | Faz upload de fotos para a API de imagens do Mercado Livre e retorna links HTTPS válidos. |
+| `POST` | `/v1/listings/build` | **Uma chamada só:** planilha vazia + anúncios em JSON + imagens. Sobe as fotos, preenche a coluna `K` e devolve o `.xlsx`. |
+
+---
+
+## 🧾 Exemplo: camisetas em uma chamada
+
+Os arquivos de [`examples/`](examples) usam o modelo de teste [`tests/fixtures/camiseta-09-06.xlsx`](tests/fixtures/camiseta-09-06.xlsx). Para publicar de verdade, troque pelo modelo que você acabou de baixar em **Anúncios > Anunciar em massa**.
+
+Cada linha usa as **letras das colunas** da planilha. Numa camiseta, as obrigatórias são:
+
+| Coluna | Campo | Exemplo |
+|---|---|---|
+| `A` | Título (até 60 caracteres) | `Camiseta Infantil Algodao Dinossauro Preta` |
+| `C` | Condição | `Novo` |
+| `D` | Cor | `Preto` |
+| `G` | Tamanho | `2` |
+| `H` | Marca | `Genérica` |
+| `I` | Gênero | `Sem gênero infantil` |
+| `J` | Código do guia de medidas | `1000001` |
+| `K` | Fotos (URLs HTTPS separadas por vírgula) — ou `photos` no `/build` | |
+| `L` | GTIN, ou um motivo da lista | `O produto não tem código cadastrado` |
+| `N` | Estoque | `10` |
+| `O` | Preço (8 a 1000000, até duas casas) | `39.90` |
+| `S`, `U`, `V`, `W` | Tipo de anúncio, envio, custo de envio, retirada | `Clássico`, `Mercado Envios`, ... |
+| `AA`–`AD` | Modelo, tipo de roupa, manga, material | `Dinossauro`, `Camiseta`, `Curta`, `Algodão` |
+
+Use `POST /v1/templates/inspect` para ver todas as colunas e as opções aceitas do seu modelo.
+
+### `/v1/listings/build` — modelo + anúncios + fotos
+
+Cada linha cita suas imagens em `photos`, pelo nome do arquivo enviado em `images`. A API confere todas as linhas **antes** de subir qualquer foto, sobe cada imagem uma vez (mesmo usada em várias linhas) e preenche a `K` na ordem de `photos`.
+
+```bash
+curl -f -o anuncios.xlsx \
+  -H "Authorization: Bearer $ML_ACCESS_TOKEN" \
+  -F "template=@tests/fixtures/camiseta-09-06.xlsx" \
+  -F "payload=<examples/build-camiseta.json" \
+  -F "images=@frente.jpg;type=image/jpeg" \
+  -F "images=@costas.jpg;type=image/jpeg" \
+  http://localhost:8000/v1/listings/build
+```
+
+No PowerShell, use `curl.exe` e `$env:ML_ACCESS_TOKEN`, numa linha só.
+
+O token só é exigido quando alguma linha tem `photos`. Uma linha que já traz a `K` pronta não sobe nada.
+
+### `/v1/workbooks/fill` — modelo + anúncios com URLs prontas
+
+```bash
+curl -f -o anuncios.xlsx \
+  -F "template=@tests/fixtures/camiseta-09-06.xlsx" \
+  -F "payload=<examples/fill-camiseta.json" \
+  http://localhost:8000/v1/workbooks/fill
+```
+
+### Erros
+
+A API recusa a linha antes de gravar e lista **todos** os problemas:
+
+```json
+{
+  "detail": "Listing row 1, column O must be between 8 and 1000000 with at most two decimals.",
+  "code": "VALIDATION_ERROR",
+  "errors": [
+    {"row": 1, "column": "O", "message": "Listing row 1, column O must be between 8 and 1000000 with at most two decimals."},
+    {"row": 2, "column": "K", "message": "Listing row 2, column K: photo 1 was not sent in images."}
+  ]
+}
+```
+
+Além das regras da própria planilha, o modelo de **Camisetas e Regatas** confere o que o Mercado Livre recusaria depois do envio: título até 60 caracteres, preço de 8 a 1000000, GTIN com dígito verificador, unidades do kit, prazo e unidade da garantia, descrição em texto simples e gênero/tamanho do guia de medidas.
+
+| Status | Quando |
+|---|---|
+| `422` | linha inválida (lista completa em `errors`) |
+| `401` | linha com `photos` sem token, ou token recusado pelo Mercado Livre |
+| `413` | imagem acima de 10 MB ou mais de 200 imagens |
+| `415` | imagem que não é PNG, JPEG ou WEBP |
+| `400` | JSON inválido, imagem vazia ou duas imagens com o mesmo nome |
+| `502` | um upload falhou no meio: nenhum `.xlsx` é devolvido e `uploaded` diz quantas fotos já subiram |
 
 ---
 
