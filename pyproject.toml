@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "requests>=2.31.0",
     "pydantic>=2.0.0",
+    "mcp>=2.3,<3",
 ]
 
 [project.optional-dependencies]
@@ -19,9 +20,6 @@ api = [
     "fastapi>=0.110.0",
     "uvicorn>=0.28.0",
     "python-multipart>=0.0.9",
-]
-mcp = [
-    "mcp>=2.3,<3",
 ]
 test = [
     "pytest",
@@ -35,7 +33,9 @@ mercado-livre-anuncios-mcp = "app.mcp_server:main"
 Repository = "https://github.com/nogran/mercado-livre-anuncios-em-massa"
 
 [tool.setuptools]
-packages = ["app"]
+packages = ["app", "app.examples"]
+package-dir = { "app" = "app", "app.examples" = "examples" }
 
 [tool.setuptools.package-data]
 app = ["listing_contract.json"]
+"app.examples" = ["*.json"]

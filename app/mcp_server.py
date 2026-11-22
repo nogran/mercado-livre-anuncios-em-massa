@@ -354,6 +354,44 @@ def build_listings(template_path: str, rows: List[Dict[str, Any]], output_path: 
     return _answer(run)
 
 
+COLUMNS = """Camisetas e Regatas: one row per color and size. Keys are column letters.
+
+| Column | Field | Example |
+|---|---|---|
+| A | Title (up to 60 characters, same for every variation) | Camiseta Infantil Algodao Dinossauro Preta |
+| C | Condition | Novo |
+| D | Color | Preto |
+| G | Size | 2 |
+| H | Brand | Genérica |
+| I | Gender | Sem gênero infantil |
+| J | Size guide code | 1000001 |
+| K | Photo URLs (HTTPS, comma separated), or "photos" with local paths in build_listings | |
+| L | GTIN, or a reason from the list | O produto não tem código cadastrado |
+| N | Stock | 10 |
+| O | Price (8 to 1000000, up to two decimals) | 39.90 |
+| S, U, V, W | Listing type, shipping, shipping cost, pickup | Clássico, Mercado Envios, ... |
+| AA-AD | Model, garment type, sleeve, material | Dinossauro, Camiseta, Curta, Algodão |
+
+Allowed options and required columns come from inspect_template on the seller's own workbook.
+"""
+
+
+def _example() -> str:
+    here = os.path.dirname(os.path.abspath(__file__))
+    for folder in (os.path.join(here, 'examples'), os.path.join(os.path.dirname(here), 'examples')):
+        path = os.path.join(folder, 'build-camiseta.json')
+        if os.path.isfile(path):
+            with open(path, encoding='utf8') as handle:
+                return handle.read()
+    raise FileNotFoundError('build-camiseta.json is not installed with the package.')
+
+
+@server.resource('mlam://exemplos/camiseta', name='camiseta-example', mime_type='text/markdown',
+                 description='Column guide and a complete build_listings example for Camisetas e Regatas.')
+def camiseta_example() -> str:
+    return f'{COLUMNS}\nExample rows for build_listings (photos are paths in the work folder):\n\n```json\n{_example()}```\n'
+
+
 def main() -> None:
     WorkDir()
     server.run('stdio')

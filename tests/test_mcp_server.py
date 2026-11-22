@@ -301,3 +301,14 @@ async def test_no_tool_takes_a_token_argument():
     for tool in tools:
         assert not any('token' in name.lower() or 'auth' in name.lower()
                        for name in tool.input_schema.get('properties', {}))
+
+
+async def test_example_resource_has_the_columns_and_rows():
+    async with Client(server) as client:
+        listed = [str(r.uri) for r in (await client.list_resources()).resources]
+        read = await client.read_resource('mlam://exemplos/camiseta')
+    assert listed == ['mlam://exemplos/camiseta']
+    text = read.contents[0].text
+    assert '| K |' in text
+    example = json.loads(text.split('```json\n', 1)[1].split('```', 1)[0])
+    assert example == json.loads((EXAMPLES / 'build-camiseta.json').read_text(encoding='utf8'))
