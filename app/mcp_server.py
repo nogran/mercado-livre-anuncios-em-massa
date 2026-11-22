@@ -16,8 +16,9 @@ from mcp.server.mcpserver import MCPServer
 from mcp_types import CallToolResult, TextContent, ToolAnnotations
 
 from . import __version__
-from .build import PHOTOS, PHOTO_COLUMN, Image, PhotoUploadFailed, build, check_images, plan_rows
+from .build import PHOTOS, PHOTO_COLUMN, Image, PhotoUploadFailed, build, plan_rows
 from .exceptions import MarketplaceError, RequestRejected, ValidationError, WorkbookError
+from .photos import upload_picture
 from .profile import column_number
 from .workbook import OfficialWorkbook, digest
 from .workdir import FileRefused, WorkDir
@@ -281,6 +282,75 @@ def fill_workbook(template_path: str, rows: List[Dict[str, Any]], output_path: s
         filled = _workbook(work, template_path).export(rows)
         work.write(target, filled)
         return {'output_path': work.relative(target), 'rows': len(rows), 'sha256': digest(filled)}
+    return _answer(run)
+
+
+TOKEN_MISSING = (f'Set {TOKEN_VARIABLE} in the MCP server configuration with a Mercado Libre access token '
+                 'to upload photos.')
+
+
+class Photo(TypedDict):
+    picture_id: Optional[str]
+    url: str
+    obtained_at: str
+    expires_at: str
+
+
+@server.tool(
+    title='Upload one photo to Mercado Libre',
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
+                                open_world_hint=True),
+)
+def upload_photo(image_path: str) -> Photo:
+    """Upload one local photo (PNG, JPEG or WEBP, up to 10 MB) and return its HTTPS URL for column "K".
+
+    Uses the token in ML_ACCESS_TOKEN. Mercado Libre keeps a picture that no listing uses for a
+    limited time, so upload close to sending the workbook.
+    """
+    def run() -> Dict[str, Any]:
+        work = WorkDir()
+        mime = work.image_mime(image_path)
+        raw = work.read_image(image_path)
+        if not _token():
+            raise ToolFailure('ML_TOKEN_MISSING', TOKEN_MISSING)
+        return upload_picture(_token(), raw, mime)
+    return _answer(run)
+
+
+class Built(TypedDict):
+    output_path: str
+    rows: int
+    uploaded: int
+    sha256: str
+
+
+@server.tool(
+    title='Upload photos and write the workbook',
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
+                                open_world_hint=True),
+)
+def build_listings(template_path: str, rows: List[Dict[str, Any]], output_path: str,
+                   overwrite: bool = False) -> Built:
+    """Upload the rows' local photos and write the filled workbook as ``output_path`` (.xlsx).
+
+    Each row lists photo paths in "photos" (in listing order) instead of URLs in "K"; a photo used
+    by several rows is uploaded once. Every row and every file is checked before the first upload.
+    If an upload fails midway, nothing is written and ``uploaded`` says how many went up.
+    Uses the token in ML_ACCESS_TOKEN.
+    """
+    def run() -> Dict[str, Any]:
+        work = WorkDir()
+        target = work.output(output_path, overwrite)
+        real = work.resolve(template_path)
+        template = work.read_template(template_path)
+        wb = OfficialWorkbook(template, filename=real.name)
+        images = _check_rows(work, wb, rows, read=True)
+        if images and not _token():
+            raise ToolFailure('ML_TOKEN_MISSING', TOKEN_MISSING)
+        filled, uploaded = build(template, real.name, rows, images, _token())
+        work.write(target, filled)
+        return {'output_path': work.relative(target), 'rows': len(rows), 'uploaded': uploaded,
+                'sha256': digest(filled)}
     return _answer(run)
 
 
