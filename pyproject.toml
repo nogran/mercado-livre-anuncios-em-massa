@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mercado-livre-anuncios-em-massa"
+version = "0.1.0"
+description = "Fill and validate official Mercado Libre bulk listing workbooks (.xlsx), over HTTP or MCP."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31.0",
+    "pydantic>=2.0.0",
+    "mcp>=2.3,<3",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "python-multipart>=0.0.9",
+]
+test = [
+    "pytest",
+    "httpx",
+]
+
+[project.scripts]
+mercado-livre-anuncios-mcp = "app.mcp_server:main"
+
+[project.urls]
+Repository = "https://github.com/nogran/mercado-livre-anuncios-em-massa"
+
+[tool.setuptools]
+packages = ["app", "app.examples"]
+package-dir = { "app" = "app", "app.examples" = "examples" }
+
+[tool.setuptools.package-data]
+app = ["listing_contract.json"]
+"app.examples" = ["*.json"]

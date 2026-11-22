@@ -196,9 +196,58 @@ Além das regras da própria planilha, o modelo de **Camisetas e Regatas** confe
 
 ---
 
+## 🤖 Servidor MCP (Claude e outros agentes)
+
+O mesmo núcleo da API também roda como servidor [MCP](https://modelcontextprotocol.io), por stdio. Você pede ao agente algo como *"monte os anúncios da camiseta dinossauro, preta e branca, tamanhos 4 a 16, com as fotos da pasta `fotos/`"*. Ele lê o modelo, confere as linhas, sobe as fotos e grava o `.xlsx`. Não precisa montar `curl` nem JSON na mão.
+
+Os arquivos são passados por **caminho**, sempre dentro da **pasta de trabalho**: `MLAM_WORKDIR`, ou a pasta onde o servidor foi iniciado. Caminhos com `..`, fora da pasta ou atalhos que levam para fora são recusados. O token do Mercado Livre fica **só** na variável `ML_ACCESS_TOKEN` da configuração. Nenhuma ferramenta recebe o token, e ele não aparece em resposta nem em erro.
+
+| Ferramenta | O que faz |
+|---|---|
+| `inspect_template` | Lê o modelo vazio: colunas, obrigatórias, opções, limites, guias e prazo. Com `columns: ["D","G"]`, traz todas as opções dessas colunas. |
+| `validate_rows` | Confere as linhas e os arquivos de `photos`, sem gravar nem subir nada. Devolve todos os erros (linha, coluna, mensagem). |
+| `fill_workbook` | Grava o `.xlsx` com a `K` já em URLs. É o mesmo resultado de `/v1/workbooks/fill`. |
+| `upload_photo` | Sobe uma foto local e devolve a URL HTTPS para a `K`. |
+| `build_listings` | Sobe as fotos de `photos` (cada uma uma vez) e grava o `.xlsx`. É o mesmo resultado de `/v1/listings/build`. |
+
+O recurso `mlam://exemplos/camiseta` traz a tabela de colunas e o exemplo completo de [`examples/build-camiseta.json`](examples/build-camiseta.json). Os erros usam os mesmos códigos da API (`VALIDATION_ERROR` com `errors`, `ML_TOKEN_MISSING`, `PHOTO_UPLOAD_FAILED` com `uploaded`…), além de `PATH_OUTSIDE_WORKDIR`, `FILE_NOT_FOUND`, `INVALID_MIME` e `OUTPUT_EXISTS`. Um arquivo que já existe só é substituído com `overwrite: true`.
+
+Para usar, é preciso ter o [uv](https://docs.astral.sh/uv/) instalado. Não precisa clonar o repositório.
+
+**Claude Code**, dentro da pasta onde estão o modelo e as fotos:
+
+```bash
+claude mcp add anuncios-em-massa -e ML_ACCESS_TOKEN=APP_USR-... -- \
+  uvx --from git+https://github.com/nogran/mercado-livre-anuncios-em-massa mercado-livre-anuncios-mcp
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "anuncios-em-massa": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/nogran/mercado-livre-anuncios-em-massa", "mercado-livre-anuncios-mcp"],
+      "env": {
+        "MLAM_WORKDIR": "C:\\Users\\voce\\Anuncios",
+        "ML_ACCESS_TOKEN": "APP_USR-..."
+      }
+    }
+  }
+}
+```
+
+Sem `ML_ACCESS_TOKEN`, `inspect_template`, `validate_rows`, `fill_workbook` e `build_listings` com a `K` pronta continuam funcionando. Só o upload de fotos fica bloqueado. O `.xlsx` gerado continua sendo enviado por você em **Anúncios > Anunciar em massa**.
+
+Numa cópia do repositório: `pip install -e .` e depois `mercado-livre-anuncios-mcp` (ou `python -m app.mcp_server`).
+
+---
+
 ## 🧪 Rodando os Testes
 
 ```bash
+pip install -e ".[api,test]"
 pytest tests -v
 ```
 
