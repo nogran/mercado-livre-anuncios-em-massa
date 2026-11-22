@@ -1,13 +1,16 @@
 """MCP tools through an in-memory client: same core and same answers as the HTTP server."""
 import json
+import re
 import shutil
 
 import pytest
+from fastapi.testclient import TestClient
 from mcp import Client
 
 from app.mcp_server import server
+from app.server import app
 from app.validation import row_errors
-from app.workbook import OfficialWorkbook
+from app.workbook import OfficialWorkbook, digest
 from tests.test_workbook import LOCAL_SAMPLE, completed_row
 
 pytestmark = pytest.mark.anyio
@@ -102,3 +105,67 @@ async def test_photos_and_k_together_is_a_row_error(work, wb):
     row = dict(completed_row(wb), K='https://http2.mlstatic.com/a.jpg', photos=['fotos/frente.jpg'])
     result = await call('validate_rows', {'template_path': 'modelo.xlsx', 'rows': [row]})
     assert result.structured_content['errors'][0]['message'].endswith('send either K or photos, not both.')
+
+
+EXAMPLES = LOCAL_SAMPLE.parents[2] / 'examples'
+XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+
+def editable_cells(raw):
+    """Every editable cell in the data window, as {"K9": "<c ...>"}."""
+    wb = OfficialWorkbook(raw)
+    profile = wb.profile
+    cells = {}
+    for number, body in re.findall(r'<row\b[^>]*\br="(\d+)"[^>]*>(.*?)</row>', wb.xml, re.S):
+        if not profile.first_row <= int(number) <= profile.last_row:
+            continue
+        for cell in re.findall(r'<c\b[^>]*(?:/>|>.*?</c>)', body, re.S):
+            ref = re.search(r'\br="([A-Z]+)(\d+)"', cell)
+            if ref[1] in profile.editable:
+                cells[ref[0]] = cell
+    return cells
+
+
+async def test_fill_gate_same_cells_as_http_fill(work):
+    rows = json.loads((EXAMPLES / 'fill-camiseta.json').read_text(encoding='utf8'))
+    rows = rows['rows'] if isinstance(rows, dict) else rows
+    http = TestClient(app).post(
+        '/v1/workbooks/fill',
+        files={'template': ('modelo.xlsx', LOCAL_SAMPLE.read_bytes(), XLSX)},
+        data={'payload': json.dumps({'rows': rows})},
+    )
+    assert http.status_code == 200, http.text
+
+    result = await call('fill_workbook', {'template_path': 'modelo.xlsx', 'rows': rows, 'output_path': 'saida.xlsx'})
+    assert not result.is_error, result.content
+    written = (work / 'saida.xlsx').read_bytes()
+    assert result.structured_content == {'output_path': 'saida.xlsx', 'rows': len(rows), 'sha256': digest(written)}
+    assert editable_cells(written) == editable_cells(http.content)
+    assert any('Camiseta' in cell for cell in editable_cells(written).values())
+
+
+async def test_fill_writes_nothing_on_invalid_rows(work, wb):
+    rows = [completed_row(wb), completed_row(wb, A='')]
+    result = await call('fill_workbook', {'template_path': 'modelo.xlsx', 'rows': rows, 'output_path': 'saida.xlsx'})
+    assert result.is_error
+    body = result.structured_content
+    assert body['code'] == 'VALIDATION_ERROR'
+    assert body['errors'] == row_errors(wb.profile, rows)
+    assert not (work / 'saida.xlsx').exists()
+
+
+async def test_fill_keeps_an_existing_file_unless_asked(work, wb):
+    (work / 'saida.xlsx').write_bytes(b'old')
+    arguments = {'template_path': 'modelo.xlsx', 'rows': [completed_row(wb)], 'output_path': 'saida.xlsx'}
+    result = await call('fill_workbook', arguments)
+    assert result.is_error and result.structured_content['code'] == 'OUTPUT_EXISTS'
+    assert (work / 'saida.xlsx').read_bytes() == b'old'
+    result = await call('fill_workbook', dict(arguments, overwrite=True))
+    assert not result.is_error
+    assert (work / 'saida.xlsx').read_bytes() != b'old'
+
+
+async def test_fill_sends_photo_rows_to_build(work, wb):
+    row = dict(completed_row(wb), photos=['fotos/frente.jpg'])
+    result = await call('fill_workbook', {'template_path': 'modelo.xlsx', 'rows': [row], 'output_path': 'saida.xlsx'})
+    assert result.is_error and result.structured_content['code'] == 'PHOTOS_NEED_BUILD'

@@ -19,7 +19,7 @@ from . import __version__
 from .build import PHOTOS, PHOTO_COLUMN, Image, PhotoUploadFailed, build, check_images, plan_rows
 from .exceptions import MarketplaceError, RequestRejected, ValidationError, WorkbookError
 from .profile import column_number
-from .workbook import OfficialWorkbook
+from .workbook import OfficialWorkbook, digest
 from .workdir import FileRefused, WorkDir
 
 TOKEN_VARIABLE = 'ML_ACCESS_TOKEN'
@@ -251,6 +251,36 @@ def validate_rows(template_path: str, rows: List[Dict[str, Any]]) -> Validation:
         except ValidationError as error:
             return {'ok': False, 'errors': error.errors or [{'row': None, 'column': None, 'message': str(error)}]}
         return {'ok': True, 'errors': []}
+    return _answer(run)
+
+
+class Written(TypedDict):
+    output_path: str
+    rows: int
+    sha256: str
+
+
+@server.tool(
+    title='Write the filled workbook',
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                                open_world_hint=False),
+)
+def fill_workbook(template_path: str, rows: List[Dict[str, Any]], output_path: str,
+                  overwrite: bool = False) -> Written:
+    """Write the rows into a copy of the empty workbook and save it as ``output_path`` (.xlsx).
+
+    Photos must already be HTTPS URLs in column "K" (comma separated); for local photo files use
+    build_listings. Nothing is written when any row is invalid; the error lists every problem.
+    An existing ``output_path`` is replaced only with ``overwrite: true``.
+    """
+    def run() -> Dict[str, Any]:
+        work = WorkDir()
+        target = work.output(output_path, overwrite)
+        if any(isinstance(row, dict) and PHOTOS in row for row in rows):
+            raise ToolFailure('PHOTOS_NEED_BUILD', 'Rows with "photos" go to build_listings, which uploads them.')
+        filled = _workbook(work, template_path).export(rows)
+        work.write(target, filled)
+        return {'output_path': work.relative(target), 'rows': len(rows), 'sha256': digest(filled)}
     return _answer(run)
 
 
