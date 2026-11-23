@@ -209,6 +209,12 @@ Os arquivos são passados por **caminho**, sempre dentro da **pasta de trabalho*
 | `fill_workbook` | Grava o `.xlsx` com a `K` já em URLs. É o mesmo resultado de `/v1/workbooks/fill`. |
 | `upload_photo` | Sobe uma foto local e devolve a URL HTTPS para a `K`. |
 | `build_listings` | Sobe as fotos de `photos` (cada uma uma vez) e grava o `.xlsx`. É o mesmo resultado de `/v1/listings/build`. |
+| `find_listings` | Depois de o ML criar os anúncios: acha na conta os itens cujo título de família é um dos títulos da planilha (sem diferenciar maiúsculas). Com o mesmo `rows_path`, diz se a quantidade de itens bate com a de linhas. Só leitura. |
+| `set_free_shipping` | Liga o frete grátis de quem está sem (o ML cria os anúncios da planilha sem ele). |
+| `fill_attributes` | Preenche a ficha técnica (`{"COMPOSITION": "Algodão", ...}`) só nos campos vazios; valor já preenchido nunca é trocado. |
+| `video_upload_links` | Um link de envio de vídeo por família de anúncio. Só leitura. |
+
+`set_free_shipping` e `fill_attributes` são **prévia** por padrão: devolvem o que mudaria (`would_change`) e o que já está certo (`already`), sem tocar em nada. Só com `apply: true` eles alteram, e cada alteração é lida de volta para confirmar. Repetir é seguro, nunca mexem em preço, estoque nem título, e um item com erro não para os outros (vai em `failed`).
 
 Com muitas linhas (uma rodada de 168 linhas não cabe bem numa chamada), grave-as num JSON dentro da pasta de trabalho e passe `rows_path` no lugar de `rows` em `validate_rows`, `fill_workbook` e `build_listings`. O arquivo tem a lista de linhas ou `{"rows": [...]}`, como os de [`examples/`](examples/). Passar os dois, ou nenhum, é recusado (`ROWS_AMBIGUOUS`, `ROWS_MISSING`); JSON inválido volta como `ROWS_FILE_INVALID`.
 
