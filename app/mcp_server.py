@@ -40,7 +40,7 @@ server = MCPServer(
         'Paths are relative to the work folder. The seller uploads the finished .xlsx in Mercado Libre. '
         'After Mercado Libre creates the listings: find_listings (same titles or rows file), then '
         'set_free_shipping and fill_attributes (preview first; apply: true only after the seller agrees) and '
-        'video_upload_links.'
+        'video_upload_links. listing_stats reads visits and sales per item and per family.'
     ),
 )
 
@@ -520,6 +520,46 @@ def video_upload_links(item_ids: List[str]) -> VideoLinks:
     token in ML_ACCESS_TOKEN.
     """
     return _answer(lambda: listings.video_links(_seller(), listings.clean_ids(item_ids)))
+
+
+class ItemStats(TypedDict):
+    id: str
+    family_name: str
+    status: Optional[str]
+    sold: int
+    visits: int
+    visits_7d: int
+    age_days: Optional[int]
+
+
+class FamilyStats(TypedDict):
+    family_name: str
+    items: int
+    active: int
+    sold: int
+    visits: int
+    visits_7d: int
+    age_days: Optional[int]
+
+
+class Stats(TypedDict):
+    days: int
+    items: List[ItemStats]
+    families: List[FamilyStats]
+    failed: List[ItemFailure]
+
+
+@server.tool(
+    title='Visits and sales per listing',
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+)
+def listing_stats(item_ids: List[str], days: int = 30) -> Stats:
+    """Visits (last ``days``, 1 to 90, and last 7), sales, status and age per item, summed per family.
+
+    ``families`` comes sorted by visits, most first. ``sold`` is the item's total since it was
+    created, not only in the window. Read only; nothing changes. Uses the token in ML_ACCESS_TOKEN.
+    """
+    return _answer(lambda: listings.stats(_seller(), listings.clean_ids(item_ids), days))
 
 
 COLUMNS = """Camisetas e Regatas: one row per color and size. Keys are column letters.

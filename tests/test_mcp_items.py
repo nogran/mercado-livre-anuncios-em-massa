@@ -1,6 +1,7 @@
 """MCP tools for after publishing, against a fake Mercado Libre seller API."""
 import copy
 import json
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -57,6 +58,12 @@ class FakeSeller:
             start = int(query.get('scroll_id', ['0'])[0] or 0)
             return Response(200, {'results': hits[start:start + 2], 'scroll_id': str(start + 2)})
         target = self.items[parts.path.split('/')[2]]
+        if parts.path.endswith('/visits/time_window'):
+            days = int(query['last'][0])
+            today = datetime.now(timezone.utc).date()
+            results = [{'date': f'{today - timedelta(days=n)}T00:00:00Z', 'total': target.get('daily', 0)}
+                       for n in range(days)]
+            return Response(200, {'total_visits': sum(r['total'] for r in results), 'results': results})
         if method == 'PUT':
             if 'shipping' in json:
                 target['shipping'].update(json['shipping'])
@@ -184,3 +191,23 @@ async def test_refusals(seller, name, arguments, code):
     result = await call(name, arguments)
     assert result.is_error and result.structured_content['code'] == code, result.content
     assert puts(seller) == []
+
+
+async def test_stats_per_item_and_family(seller):
+    ten_days_ago = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    for item_id, daily, sold, status in (('MLB1', 2, 1, 'active'), ('MLB2', 1, 0, 'paused'), ('MLB3', 5, 3, 'active')):
+        seller.items[item_id].update(daily=daily, sold_quantity=sold, status=status, date_created=ten_days_ago)
+    result = await call('listing_stats', {'item_ids': ['MLB1', 'MLB2', 'MLB3'], 'days': 14})
+    assert not result.is_error, result.content
+    body = result.structured_content
+    first = body['items'][0]
+    assert first == {'id': 'MLB1', 'family_name': 'Camiseta Infantil Dino Xp Preta', 'status': 'active',
+                     'sold': 1, 'visits': 28, 'visits_7d': 14, 'age_days': 10}
+    assert [(f['family_name'], f['items'], f['active'], f['visits'], f['sold']) for f in body['families']] == [
+        ('Camiseta Infantil Gato Branca', 1, 1, 70, 3), ('Camiseta Infantil Dino Xp Preta', 2, 1, 42, 1)]
+    assert puts(seller) == []
+
+
+async def test_stats_refuses_a_bad_window(seller):
+    result = await call('listing_stats', {'item_ids': ['MLB1'], 'days': 91})
+    assert result.is_error and result.structured_content['code'] == 'DAYS_INVALID'

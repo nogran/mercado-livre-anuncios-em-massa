@@ -8,6 +8,7 @@ the items a workbook created, by family title, and fix what the seller asks:
 - ``free_shipping``: turn on free shipping, skipping items already on.
 - ``fill_attributes``: write attributes only where the item has no value.
 - ``video_links``: one video upload link per family.
+- ``stats``: visits and sales per item and per family (read only).
 
 Every change runs as a preview unless ``apply`` is true, never touches price,
 stock or title, and repeating it is safe: an item already right is skipped.
@@ -15,6 +16,7 @@ Calls go one item at a time (Mercado Libre turned off ``/items?ids=``), in a
 few threads with a reused connection.
 """
 import threading
+from datetime import date, datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from urllib.parse import quote
@@ -234,6 +236,59 @@ def video_links(ml: MercadoLibre, item_ids: List[str]) -> Dict[str, Any]:
         }
     return {
         'links': [{'family_name': name, **link} for name, link in links.items()],
+        'failed': [r for r in read_back if 'error' in r],
+    }
+
+
+MAX_DAYS = 90
+
+
+def stats(ml: MercadoLibre, item_ids: List[str], days: int = 30) -> Dict[str, Any]:
+    """Status, sales, age and visits (last ``days`` and last 7) per item, summed per family title.
+
+    Two calls per item: Mercado Libre answers visits for one item at a time. Read only.
+    """
+    if not isinstance(days, int) or not 1 <= days <= MAX_DAYS:
+        raise MarketplaceError(f'days must be a whole number from 1 to {MAX_DAYS}.', 'DAYS_INVALID')
+    today = datetime.now(timezone.utc).date()
+
+    def read(item_id: str) -> Dict[str, Any]:
+        item = ml.item(item_id, 'id,family_name,status,sold_quantity,date_created')
+        visits = ml.call('GET', f'/items/{quote(item_id)}/visits/time_window?last={days}&unit=day')
+        per_day = {}
+        for entry in visits.get('results') or []:
+            try:
+                per_day[date.fromisoformat(str(entry.get('date', ''))[:10])] = int(entry.get('total') or 0)
+            except ValueError:
+                continue
+        created = str(item.get('date_created') or '')[:10]
+        return {
+            'id': item_id,
+            'family_name': item.get('family_name') or item_id,
+            'status': item.get('status'),
+            'sold': int(item.get('sold_quantity') or 0),
+            'visits': int(visits.get('total_visits') or sum(per_day.values())),
+            'visits_7d': sum(v for d, v in per_day.items() if (today - d).days < 7),
+            'age_days': (today - date.fromisoformat(created)).days if created else None,
+        }
+
+    read_back = ml.each(read, item_ids)
+    rows = [r for r in read_back if 'error' not in r]
+    families: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        family = families.setdefault(row['family_name'], {
+            'family_name': row['family_name'], 'items': 0, 'active': 0, 'sold': 0, 'visits': 0,
+            'visits_7d': 0, 'age_days': None})
+        family['items'] += 1
+        family['active'] += row['status'] == 'active'
+        for key in ('sold', 'visits', 'visits_7d'):
+            family[key] += row[key]
+        if row['age_days'] is not None:
+            family['age_days'] = max(family['age_days'] or 0, row['age_days'])
+    return {
+        'days': days,
+        'items': rows,
+        'families': sorted(families.values(), key=lambda f: (-f['visits'], f['family_name'])),
         'failed': [r for r in read_back if 'error' in r],
     }
 

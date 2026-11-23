@@ -213,6 +213,7 @@ Os arquivos são passados por **caminho**, sempre dentro da **pasta de trabalho*
 | `set_free_shipping` | Liga o frete grátis de quem está sem (o ML cria os anúncios da planilha sem ele). |
 | `fill_attributes` | Preenche a ficha técnica (`{"COMPOSITION": "Algodão", ...}`) só nos campos vazios; valor já preenchido nunca é trocado. |
 | `video_upload_links` | Um link de envio de vídeo por família de anúncio. Só leitura. |
+| `listing_stats` | Visitas (últimos `days`, de 1 a 90, e últimos 7 dias), vendas, status e idade por item, somados por família e ordenados por visitas. Só leitura. |
 
 `set_free_shipping` e `fill_attributes` são **prévia** por padrão: devolvem o que mudaria (`would_change`) e o que já está certo (`already`), sem tocar em nada. Só com `apply: true` eles alteram, e cada alteração é lida de volta para confirmar. Repetir é seguro, nunca mexem em preço, estoque nem título, e um item com erro não para os outros (vai em `failed`).
 
