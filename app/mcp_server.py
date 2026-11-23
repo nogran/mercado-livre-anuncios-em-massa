@@ -17,6 +17,7 @@ from mcp_types import CallToolResult, TextContent, ToolAnnotations
 
 from . import __version__
 from .build import PHOTOS, PHOTO_COLUMN, Image, PhotoUploadFailed, build, plan_rows
+from . import items as listings
 from .exceptions import MarketplaceError, RequestRejected, ValidationError, WorkbookError
 from .photos import upload_picture
 from .profile import column_number
@@ -36,7 +37,10 @@ server = MCPServer(
         'check them with validate_rows, then write the file with fill_workbook (photo URLs already in K) or '
         'build_listings (local photos in "photos"). Many rows? Save them as a JSON file in the work folder and '
         'pass rows_path instead of rows. Read mlam://exemplos/camiseta for a complete example. '
-        'Paths are relative to the work folder. The seller uploads the finished .xlsx in Mercado Libre.'
+        'Paths are relative to the work folder. The seller uploads the finished .xlsx in Mercado Libre. '
+        'After Mercado Libre creates the listings: find_listings (same titles or rows file), then '
+        'set_free_shipping and fill_attributes (preview first; apply: true only after the seller agrees) and '
+        'video_upload_links.'
     ),
 )
 
@@ -391,6 +395,131 @@ def build_listings(template_path: str, output_path: str, rows: Optional[List[Dic
         return {'output_path': work.relative(target), 'rows': len(given), 'uploaded': uploaded,
                 'sha256': digest(filled)}
     return _answer(run)
+
+
+def _seller() -> listings.MercadoLibre:
+    if not _token():
+        raise ToolFailure('ML_TOKEN_MISSING', f'Set {TOKEN_VARIABLE} in the MCP server configuration with a '
+                                              'Mercado Libre access token to read and change listings.')
+    return listings.MercadoLibre(_token())
+
+
+class ItemFailure(TypedDict):
+    id: str
+    error: str
+
+
+class FoundItem(TypedDict):
+    id: str
+    family_name: str
+    status: Optional[str]
+
+
+class Found(TypedDict):
+    items: List[FoundItem]
+    item_ids: List[str]
+    per_title: Dict[str, int]
+    missing_titles: List[str]
+    expected_items: Optional[int]
+    count_matches: Optional[bool]
+    searched: List[str]
+    scanned: int
+    failed: List[ItemFailure]
+
+
+@server.tool(
+    title='Find the listings a workbook created',
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+)
+def find_listings(titles: Optional[List[str]] = None, rows_path: Optional[str] = None,
+                  search_terms: Optional[List[str]] = None) -> Found:
+    """Find the seller's items whose family title is one of the workbook titles (column "A").
+
+    Pass ``titles`` or the same ``rows_path`` used to build the workbook; with a rows file,
+    ``expected_items`` is its number of rows and ``count_matches`` says whether every row became
+    an item (Mercado Libre may still be creating them: wait a few minutes and repeat). Matching
+    ignores case. ``search_terms`` narrow the account search (default: the first two words of
+    each title). Read only. Uses the token in ML_ACCESS_TOKEN.
+    """
+    def run() -> Dict[str, Any]:
+        expected = None
+        wanted = list(titles or [])
+        if rows_path:
+            if titles:
+                raise ToolFailure('ROWS_AMBIGUOUS', 'Pass titles or rows_path, not both.')
+            given = _rows(WorkDir(), None, rows_path)
+            wanted = [row.get('A') for row in given if isinstance(row, dict) and isinstance(row.get('A'), str)]
+            expected = len(given)
+        found = listings.find_items(_seller(), wanted, search_terms)
+        found['expected_items'] = expected
+        found['count_matches'] = None if expected is None else len(found['item_ids']) == expected
+        return found
+    return _answer(run)
+
+
+class Changes(TypedDict):
+    applied: bool
+    total: int
+    changed: List[Any]
+    would_change: List[Any]
+    already: List[str]
+    failed: List[ItemFailure]
+    counts: Dict[str, int]
+
+
+@server.tool(
+    title='Turn on free shipping',
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                                open_world_hint=True),
+)
+def set_free_shipping(item_ids: List[str], apply: bool = False) -> Changes:
+    """Turn on free shipping on the items that do not have it (Mercado Libre publishes the workbook without it).
+
+    Without ``apply`` nothing changes: the answer lists ``would_change`` and ``already``. Show it to
+    the seller and repeat with ``apply: true`` only after they agree; each change is read back to
+    confirm. Never touches price, stock or title. Uses the token in ML_ACCESS_TOKEN.
+    """
+    return _answer(lambda: listings.free_shipping(_seller(), listings.clean_ids(item_ids), apply))
+
+
+@server.tool(
+    title='Fill empty listing attributes',
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                                open_world_hint=True),
+)
+def fill_attributes(item_ids: List[str], attributes: Dict[str, str], apply: bool = False) -> Changes:
+    """Fill item attributes (technical sheet) only where they are empty; a filled value is never replaced.
+
+    ``attributes`` maps Mercado Libre attribute ids to values, e.g. {"COMPOSITION": "Algodão",
+    "SLEEVE_TYPE": "Curta"}. Without ``apply`` nothing changes: ``would_change`` lists, per item,
+    the attributes that would be written. Repeat with ``apply: true`` only after the seller agrees;
+    each change is read back to confirm. Uses the token in ML_ACCESS_TOKEN.
+    """
+    return _answer(lambda: listings.fill_attributes(_seller(), listings.clean_ids(item_ids), attributes, apply))
+
+
+class VideoLink(TypedDict):
+    family_name: str
+    item_id: str
+    url: str
+
+
+class VideoLinks(TypedDict):
+    links: List[VideoLink]
+    failed: List[ItemFailure]
+
+
+@server.tool(
+    title='Video upload links',
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+)
+def video_upload_links(item_ids: List[str]) -> VideoLinks:
+    """One Mercado Libre video upload link per listing family (all colors and sizes of one title).
+
+    The seller opens each link signed in to Mercado Libre to send the video. Read only. Uses the
+    token in ML_ACCESS_TOKEN.
+    """
+    return _answer(lambda: listings.video_links(_seller(), listings.clean_ids(item_ids)))
 
 
 COLUMNS = """Camisetas e Regatas: one row per color and size. Keys are column letters.
