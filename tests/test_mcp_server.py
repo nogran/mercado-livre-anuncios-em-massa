@@ -312,3 +312,50 @@ async def test_example_resource_has_the_columns_and_rows():
     assert '| K |' in text
     example = json.loads(text.split('```json\n', 1)[1].split('```', 1)[0])
     assert example == json.loads((EXAMPLES / 'build-camiseta.json').read_text(encoding='utf8'))
+
+
+async def test_rows_path_gives_the_same_answers_as_inline_rows(work, wb):
+    rows = [completed_row(wb), completed_row(wb, A='')]
+    (work / 'linhas.json').write_text(json.dumps(rows), encoding='utf8')
+    inline = await call('validate_rows', {'template_path': 'modelo.xlsx', 'rows': rows})
+    by_file = await call('validate_rows', {'template_path': 'modelo.xlsx', 'rows_path': 'linhas.json'})
+    assert by_file.structured_content == inline.structured_content
+    assert by_file.structured_content['errors'] == row_errors(wb.profile, rows)
+
+    good = [completed_row(wb)]
+    (work / 'boas.json').write_text(json.dumps({'rows': good}), encoding='utf-8-sig')
+    await call('fill_workbook', {'template_path': 'modelo.xlsx', 'rows': good, 'output_path': 'inline.xlsx'})
+    result = await call('fill_workbook', {'template_path': 'modelo.xlsx', 'rows_path': 'boas.json',
+                                          'output_path': 'arquivo.xlsx'})
+    assert not result.is_error, result.content
+    assert result.structured_content['rows'] == 1
+    assert (work / 'arquivo.xlsx').read_bytes() == (work / 'inline.xlsx').read_bytes()
+
+
+async def test_build_reads_the_example_file_as_rows_path(work, ml):
+    shutil.copy(EXAMPLES / 'build-camiseta.json', work / 'build.json')
+    (work / 'frente.jpg').write_bytes(JPEG)
+    (work / 'costas.jpg').write_bytes(JPEG + b'2')
+    result = await call('build_listings', {'template_path': 'modelo.xlsx', 'rows_path': 'build.json',
+                                           'output_path': 'saida.xlsx'})
+    assert not result.is_error, result.content
+    assert result.structured_content['rows'] == 2 and result.structured_content['uploaded'] == 2
+    assert ml.calls == [JPEG, JPEG + b'2']
+
+
+@pytest.mark.parametrize('arguments, content, code', [
+    ({}, None, 'ROWS_MISSING'),
+    ({'rows': [], 'rows_path': 'linhas.json'}, '[]', 'ROWS_AMBIGUOUS'),
+    ({'rows_path': 'linhas.json'}, '{"rows": ', 'ROWS_FILE_INVALID'),
+    ({'rows_path': 'linhas.json'}, '{"linhas": []}', 'ROWS_FILE_INVALID'),
+    ({'rows_path': 'sumiu.json'}, None, 'FILE_NOT_FOUND'),
+    ({'rows_path': '../linhas.json'}, None, 'PATH_OUTSIDE_WORKDIR'),
+])
+async def test_rows_path_refusals(work, arguments, content, code):
+    if content is not None:
+        (work / 'linhas.json').write_text(content, encoding='utf8')
+    for tool, extra in (('validate_rows', {}), ('fill_workbook', {'output_path': 'saida.xlsx'}),
+                        ('build_listings', {'output_path': 'saida.xlsx'})):
+        result = await call(tool, {'template_path': 'modelo.xlsx', **extra, **arguments})
+        assert result.is_error and result.structured_content['code'] == code, (tool, result.content)
+    assert not (work / 'saida.xlsx').exists()

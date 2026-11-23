@@ -25,6 +25,7 @@ from .workdir import FileRefused, WorkDir
 
 TOKEN_VARIABLE = 'ML_ACCESS_TOKEN'
 SUMMARY_OPTIONS = 50
+MAX_ROWS_FILE = 16 * 1024 * 1024
 
 server = MCPServer(
     name='mercado-livre-anuncios-em-massa',
@@ -33,7 +34,8 @@ server = MCPServer(
         'Fills the official Mercado Libre bulk listing workbook (.xlsx). Start with inspect_template on the '
         'empty workbook the seller downloaded, build one row per color and size with column letters as keys, '
         'check them with validate_rows, then write the file with fill_workbook (photo URLs already in K) or '
-        'build_listings (local photos in "photos"). Read mlam://exemplos/camiseta for a complete example. '
+        'build_listings (local photos in "photos"). Many rows? Save them as a JSON file in the work folder and '
+        'pass rows_path instead of rows. Read mlam://exemplos/camiseta for a complete example. '
         'Paths are relative to the work folder. The seller uploads the finished .xlsx in Mercado Libre.'
     ),
 )
@@ -130,6 +132,30 @@ def _answer(work: Callable[[], Dict[str, Any]]) -> Any:
 def _workbook(work: WorkDir, template_path: str) -> OfficialWorkbook:
     real = work.resolve(template_path)
     return OfficialWorkbook(work.read_template(template_path), filename=real.name)
+
+
+def _rows(work: WorkDir, rows: Optional[List[Any]], rows_path: Optional[str]) -> List[Any]:
+    """The rows given inline or read from a JSON file in the work folder; exactly one of the two.
+
+    The file holds a list of rows or ``{"rows": [...]}``, as in the examples.
+    """
+    if rows is not None and rows_path:
+        raise ToolFailure('ROWS_AMBIGUOUS', 'Pass rows or rows_path, not both.')
+    if not rows_path:
+        if rows is None:
+            raise ToolFailure('ROWS_MISSING', 'Pass rows (a list of row objects) or rows_path (a JSON file).')
+        return rows
+    raw = work.read(rows_path, MAX_ROWS_FILE, 'Rows file')
+    try:
+        data = json.loads(raw.decode('utf-8-sig'))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ToolFailure('ROWS_FILE_INVALID', f'Rows file "{rows_path}" is not valid UTF-8 JSON: {error}.')
+    if isinstance(data, dict):
+        data = data.get('rows')
+    if not isinstance(data, list):
+        raise ToolFailure('ROWS_FILE_INVALID',
+                          f'Rows file "{rows_path}" must hold a list of rows or an object with a "rows" list.')
+    return data
 
 
 def _photo_paths(rows: List[Any]) -> List[str]:
@@ -236,19 +262,24 @@ def inspect_template(template_path: str, columns: Optional[List[str]] = None) ->
     title='Check listing rows',
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
 )
-def validate_rows(template_path: str, rows: List[Dict[str, Any]]) -> Validation:
+def validate_rows(template_path: str, rows: Optional[List[Dict[str, Any]]] = None,
+                  rows_path: Optional[str] = None) -> Validation:
     """Check rows against the workbook without writing or uploading anything.
 
     Each row is an object keyed by column letter ("A", "D", "G", ...). A row may list local
     photo paths in "photos" instead of URLs in "K"; each file is checked (inside the work
     folder, PNG/JPEG/WEBP, up to 10 MB) but not uploaded. Returns ``ok`` and every problem
     as ``{row, column, message}``.
+
+    Pass the rows inline in ``rows`` or, for many rows, as a JSON file in the work folder in
+    ``rows_path`` (a list of rows or ``{"rows": [...]}``); exactly one of the two.
     """
     def run() -> Dict[str, Any]:
         work = WorkDir()
+        given = _rows(work, rows, rows_path)
         wb = _workbook(work, template_path)
         try:
-            _check_rows(work, wb, rows, read=False)
+            _check_rows(work, wb, given, read=False)
         except ValidationError as error:
             return {'ok': False, 'errors': error.errors or [{'row': None, 'column': None, 'message': str(error)}]}
         return {'ok': True, 'errors': []}
@@ -266,22 +297,26 @@ class Written(TypedDict):
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
                                 open_world_hint=False),
 )
-def fill_workbook(template_path: str, rows: List[Dict[str, Any]], output_path: str,
-                  overwrite: bool = False) -> Written:
+def fill_workbook(template_path: str, output_path: str, rows: Optional[List[Dict[str, Any]]] = None,
+                  rows_path: Optional[str] = None, overwrite: bool = False) -> Written:
     """Write the rows into a copy of the empty workbook and save it as ``output_path`` (.xlsx).
 
     Photos must already be HTTPS URLs in column "K" (comma separated); for local photo files use
     build_listings. Nothing is written when any row is invalid; the error lists every problem.
     An existing ``output_path`` is replaced only with ``overwrite: true``.
+
+    Pass the rows inline in ``rows`` or, for many rows, as a JSON file in the work folder in
+    ``rows_path`` (a list of rows or ``{"rows": [...]}``); exactly one of the two.
     """
     def run() -> Dict[str, Any]:
         work = WorkDir()
+        given = _rows(work, rows, rows_path)
         target = work.output(output_path, overwrite)
-        if any(isinstance(row, dict) and PHOTOS in row for row in rows):
+        if any(isinstance(row, dict) and PHOTOS in row for row in given):
             raise ToolFailure('PHOTOS_NEED_BUILD', 'Rows with "photos" go to build_listings, which uploads them.')
-        filled = _workbook(work, template_path).export(rows)
+        filled = _workbook(work, template_path).export(given)
         work.write(target, filled)
-        return {'output_path': work.relative(target), 'rows': len(rows), 'sha256': digest(filled)}
+        return {'output_path': work.relative(target), 'rows': len(given), 'sha256': digest(filled)}
     return _answer(run)
 
 
@@ -329,27 +364,31 @@ class Built(TypedDict):
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False,
                                 open_world_hint=True),
 )
-def build_listings(template_path: str, rows: List[Dict[str, Any]], output_path: str,
-                   overwrite: bool = False) -> Built:
+def build_listings(template_path: str, output_path: str, rows: Optional[List[Dict[str, Any]]] = None,
+                   rows_path: Optional[str] = None, overwrite: bool = False) -> Built:
     """Upload the rows' local photos and write the filled workbook as ``output_path`` (.xlsx).
 
     Each row lists photo paths in "photos" (in listing order) instead of URLs in "K"; a photo used
     by several rows is uploaded once. Every row and every file is checked before the first upload.
     If an upload fails midway, nothing is written and ``uploaded`` says how many went up.
     Uses the token in ML_ACCESS_TOKEN.
+
+    Pass the rows inline in ``rows`` or, for many rows, as a JSON file in the work folder in
+    ``rows_path`` (a list of rows or ``{"rows": [...]}``); exactly one of the two.
     """
     def run() -> Dict[str, Any]:
         work = WorkDir()
+        given = _rows(work, rows, rows_path)
         target = work.output(output_path, overwrite)
         real = work.resolve(template_path)
         template = work.read_template(template_path)
         wb = OfficialWorkbook(template, filename=real.name)
-        images = _check_rows(work, wb, rows, read=True)
+        images = _check_rows(work, wb, given, read=True)
         if images and not _token():
             raise ToolFailure('ML_TOKEN_MISSING', TOKEN_MISSING)
-        filled, uploaded = build(template, real.name, rows, images, _token())
+        filled, uploaded = build(template, real.name, given, images, _token())
         work.write(target, filled)
-        return {'output_path': work.relative(target), 'rows': len(rows), 'uploaded': uploaded,
+        return {'output_path': work.relative(target), 'rows': len(given), 'uploaded': uploaded,
                 'sha256': digest(filled)}
     return _answer(run)
 

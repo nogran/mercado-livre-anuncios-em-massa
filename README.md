@@ -210,6 +210,8 @@ Os arquivos são passados por **caminho**, sempre dentro da **pasta de trabalho*
 | `upload_photo` | Sobe uma foto local e devolve a URL HTTPS para a `K`. |
 | `build_listings` | Sobe as fotos de `photos` (cada uma uma vez) e grava o `.xlsx`. É o mesmo resultado de `/v1/listings/build`. |
 
+Com muitas linhas (uma rodada de 168 linhas não cabe bem numa chamada), grave-as num JSON dentro da pasta de trabalho e passe `rows_path` no lugar de `rows` em `validate_rows`, `fill_workbook` e `build_listings`. O arquivo tem a lista de linhas ou `{"rows": [...]}`, como os de [`examples/`](examples/). Passar os dois, ou nenhum, é recusado (`ROWS_AMBIGUOUS`, `ROWS_MISSING`); JSON inválido volta como `ROWS_FILE_INVALID`.
+
 O recurso `mlam://exemplos/camiseta` traz a tabela de colunas e o exemplo completo de [`examples/build-camiseta.json`](examples/build-camiseta.json). Os erros usam os mesmos códigos da API (`VALIDATION_ERROR` com `errors`, `ML_TOKEN_MISSING`, `PHOTO_UPLOAD_FAILED` com `uploaded`…), além de `PATH_OUTSIDE_WORKDIR`, `FILE_NOT_FOUND`, `INVALID_MIME` e `OUTPUT_EXISTS`. Um arquivo que já existe só é substituído com `overwrite: true`.
 
 Para usar, é preciso ter o [uv](https://docs.astral.sh/uv/) instalado. Não precisa clonar o repositório.
