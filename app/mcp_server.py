@@ -40,7 +40,9 @@ server = MCPServer(
         'Paths are relative to the work folder. The seller uploads the finished .xlsx in Mercado Libre. '
         'After Mercado Libre creates the listings: find_listings (same titles or rows file), then '
         'set_free_shipping and fill_attributes (preview first; apply: true only after the seller agrees) and '
-        'video_upload_links. listing_stats reads visits and sales per item and per family.'
+        'video_upload_links. reorder_pictures changes the picture order of published items (size chart last, '
+        'a new cover, an explicit order, or append a picture already in the account), also preview first and '
+        'apply: true only after the seller agrees. listing_stats reads visits and sales per item and per family.'
     ),
 )
 
@@ -442,19 +444,22 @@ def find_listings(titles: Optional[List[str]] = None, rows_path: Optional[str] =
     each title). Read only. Uses the token in ML_ACCESS_TOKEN.
     """
     def run() -> Dict[str, Any]:
-        expected = None
-        wanted = list(titles or [])
-        if rows_path:
-            if titles:
-                raise ToolFailure('ROWS_AMBIGUOUS', 'Pass titles or rows_path, not both.')
-            given = _rows(WorkDir(), None, rows_path)
-            wanted = [row.get('A') for row in given if isinstance(row, dict) and isinstance(row.get('A'), str)]
-            expected = len(given)
+        wanted, expected = _titles(titles, rows_path)
         found = listings.find_items(_seller(), wanted, search_terms)
         found['expected_items'] = expected
         found['count_matches'] = None if expected is None else len(found['item_ids']) == expected
         return found
     return _answer(run)
+
+
+def _titles(titles: Optional[List[str]], rows_path: Optional[str]) -> tuple:
+    """The family titles to look for and, with a rows file, how many rows it has."""
+    if not rows_path:
+        return list(titles or []), None
+    if titles:
+        raise ToolFailure('ROWS_AMBIGUOUS', 'Pass titles or rows_path, not both.')
+    given = _rows(WorkDir(), None, rows_path)
+    return [row.get('A') for row in given if isinstance(row, dict) and isinstance(row.get('A'), str)], len(given)
 
 
 class Changes(TypedDict):
@@ -496,6 +501,42 @@ def fill_attributes(item_ids: List[str], attributes: Dict[str, str], apply: bool
     each change is read back to confirm. Uses the token in ML_ACCESS_TOKEN.
     """
     return _answer(lambda: listings.fill_attributes(_seller(), listings.clean_ids(item_ids), attributes, apply))
+
+
+@server.tool(
+    title='Reorder listing pictures',
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                                open_world_hint=True),
+)
+def reorder_pictures(rule: Optional[str] = None, item_ids: Optional[List[str]] = None,
+                     titles: Optional[List[str]] = None, rows_path: Optional[str] = None,
+                     search_terms: Optional[List[str]] = None, picture_id: Optional[str] = None,
+                     position: Optional[int] = None, order: Optional[List[str]] = None,
+                     append: Optional[str] = None, apply: bool = False) -> Changes:
+    """Change the picture order of published items, e.g. send the size chart to the end.
+
+    Items: ``item_ids``, or ``titles`` / ``rows_path`` (with ``search_terms``) found as in
+    find_listings. Rules: ``last`` sends ``picture_id`` to the end; ``cover`` makes picture
+    ``position`` (1 = current cover) or ``picture_id`` the cover; ``order`` takes every picture
+    id of the item in the new order (an item whose pictures differ from it fails, untouched).
+    ``append`` adds a picture already uploaded to the account (e.g. the size chart) at the end
+    of items without it, before the rule. Without ``apply`` nothing changes: ``would_change``
+    shows ``before`` and ``after`` per item. Repeat with ``apply: true`` only after the seller
+    agrees; each item is read back and counts as ``changed`` only if the order matches. Never
+    touches price, stock or title. Uses the token in ML_ACCESS_TOKEN.
+    """
+    def run() -> Dict[str, Any]:
+        arrange = listings.picture_rule(rule, picture_id, position, order, append)
+        seller = _seller()
+        if item_ids:
+            if titles or rows_path:
+                raise ToolFailure('ITEMS_AMBIGUOUS', 'Pass item_ids, titles or rows_path, only one.')
+            ids = listings.clean_ids(item_ids)
+        else:
+            wanted, _ = _titles(titles, rows_path)
+            ids = listings.clean_ids(listings.find_items(seller, wanted, search_terms)['item_ids'])
+        return listings.reorder_pictures(seller, ids, arrange, apply)
+    return _answer(run)
 
 
 class VideoLink(TypedDict):

@@ -298,7 +298,8 @@ async def test_no_tool_takes_a_token_argument():
         tools = (await client.list_tools()).tools
     assert {t.name for t in tools} == {
         'inspect_template', 'validate_rows', 'fill_workbook', 'upload_photo', 'build_listings',
-        'find_listings', 'set_free_shipping', 'fill_attributes', 'video_upload_links', 'listing_stats'}
+        'find_listings', 'set_free_shipping', 'fill_attributes', 'video_upload_links', 'listing_stats',
+        'reorder_pictures'}
     for tool in tools:
         assert not any('token' in name.lower() or 'auth' in name.lower()
                        for name in tool.input_schema.get('properties', {}))
