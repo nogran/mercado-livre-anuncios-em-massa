@@ -19,8 +19,9 @@ def anyio_backend():
     return 'asyncio'
 
 
-def item(item_id, family, free=False, attributes=(), product='UP1', status='active'):
+def item(item_id, family, free=False, attributes=(), product='UP1', status='active', pictures=('P1', 'P2', 'P3')):
     return {'id': item_id, 'family_name': family, 'status': status, 'user_product_id': product,
+            'pictures': [{'id': p, 'url': f'http://img/{p}.jpg'} for p in pictures],
             'shipping': {'free_shipping': free, 'mode': 'me2'},
             'attributes': [{'id': k, 'value_name': v} for k, v in attributes]}
 
@@ -41,6 +42,7 @@ class FakeSeller:
         self.items = {i['id']: copy.deepcopy(i) for i in items}
         self.calls = []
         self.status = {}
+        self.ignore_pictures = set()
 
     def __call__(self, method, url, headers=None, json=None, timeout=None):
         assert headers['Authorization'] == f'Bearer {TOKEN}'
@@ -68,6 +70,8 @@ class FakeSeller:
             if 'shipping' in json:
                 target['shipping'].update(json['shipping'])
             target['attributes'].extend(json.get('attributes', []))
+            if 'pictures' in json and target['id'] not in self.ignore_pictures:
+                target['pictures'] = [{'id': p['id'], 'url': f"http://img/{p['id']}.jpg"} for p in json['pictures']]
         return Response(200, copy.deepcopy(target))
 
 
@@ -211,3 +215,89 @@ async def test_stats_per_item_and_family(seller):
 async def test_stats_refuses_a_bad_window(seller):
     result = await call('listing_stats', {'item_ids': ['MLB1'], 'days': 91})
     assert result.is_error and result.structured_content['code'] == 'DAYS_INVALID'
+
+
+def picture_ids(fake, item_id):
+    return [p['id'] for p in fake.items[item_id]['pictures']]
+
+
+async def test_reorder_previews_before_and_after_then_applies(seller):
+    seller.items['MLB1']['pictures'] = [{'id': 'TABELA'}, {'id': 'P1'}, {'id': 'P2'}]
+    seller.items['MLB2']['pictures'] = [{'id': 'P1'}, {'id': 'P2'}]  # no size chart on this one
+    seller.items['MLB3']['pictures'] = [{'id': 'P1'}, {'id': 'P2'}, {'id': 'TABELA'}]
+    arguments = {'item_ids': ['MLB1', 'MLB2', 'MLB3'], 'rule': 'last', 'picture_id': 'TABELA'}
+    result = await call('reorder_pictures', arguments)
+    assert not result.is_error, result.content
+    body = result.structured_content
+    assert body['applied'] is False
+    assert body['would_change'] == [{'id': 'MLB1', 'before': ['TABELA', 'P1', 'P2'],
+                                     'after': ['P1', 'P2', 'TABELA']}]
+    assert body['already'] == ['MLB3']
+    assert body['failed'] == [{'id': 'MLB2', 'error': 'Picture TABELA is not on this item.'}]
+    assert puts(seller) == []
+
+    result = await call('reorder_pictures', {**arguments, 'apply': True})
+    body = result.structured_content
+    assert [c['id'] for c in body['changed']] == ['MLB1'] and body['counts']['failed'] == 1
+    assert puts(seller) == [('PUT', '/items/MLB1', {'pictures': [{'id': 'P1'}, {'id': 'P2'}, {'id': 'TABELA'}]})]
+    assert picture_ids(seller, 'MLB1') == ['P1', 'P2', 'TABELA']
+
+
+async def test_reorder_by_titles_with_append_and_cover(seller):
+    result = await call('reorder_pictures', {'titles': ['Camiseta Infantil Dino XP Preta'], 'append': 'TABELA',
+                                             'rule': 'cover', 'position': 2, 'apply': True})
+    body = result.structured_content
+    assert [c['id'] for c in body['changed']] == ['MLB1', 'MLB2']
+    assert picture_ids(seller, 'MLB1') == ['P2', 'P1', 'P3', 'TABELA']
+    assert picture_ids(seller, 'MLB3') == ['P1', 'P2', 'P3']  # other family untouched
+
+
+async def test_reorder_refuses_an_order_that_does_not_match(seller):
+    result = await call('reorder_pictures', {'item_ids': ['MLB1', 'MLB3'], 'rule': 'order',
+                                             'order': ['P3', 'P1', 'P9'], 'apply': True})
+    body = result.structured_content
+    assert body['counts']['changed'] == 0 and body['counts']['failed'] == 2
+    assert 'missing from order: P2' in body['failed'][0]['error']
+    assert 'not on the item: P9' in body['failed'][0]['error']
+    assert puts(seller) == []
+
+    result = await call('reorder_pictures', {'item_ids': ['MLB1'], 'rule': 'order', 'order': ['P3', 'P1', 'P2'],
+                                             'apply': True})
+    assert [c['after'] for c in result.structured_content['changed']] == [['P3', 'P1', 'P2']]
+
+
+async def test_reorder_counts_only_items_that_read_back_right(seller):
+    seller.ignore_pictures.add('MLB2')  # Mercado Libre answers 200 but keeps the old order
+    result = await call('reorder_pictures', {'item_ids': ['MLB1', 'MLB2'], 'rule': 'cover', 'picture_id': 'P3',
+                                             'apply': True})
+    body = result.structured_content
+    assert [c['id'] for c in body['changed']] == ['MLB1']
+    assert body['failed'][0]['id'] == 'MLB2' and 'read back as P1, P2, P3' in body['failed'][0]['error']
+    assert body['counts'] == {'changed': 1, 'would_change': 0, 'already': 0, 'failed': 1}
+    assert [c[1] for c in puts(seller)] == ['/items/MLB1', '/items/MLB2']
+    reads = [c for c in seller.calls if c[0] == 'GET' and c[1] == '/items/MLB2']
+    assert len(reads) == 2  # before and after the PUT
+
+
+async def test_reorder_skips_items_with_variations(seller):
+    seller.items['MLB1']['variations'] = [{'id': 1, 'picture_ids': ['P1']}]
+    result = await call('reorder_pictures', {'item_ids': ['MLB1'], 'rule': 'cover', 'position': 3, 'apply': True})
+    assert 'variations' in result.structured_content['failed'][0]['error']
+    assert puts(seller) == []
+
+
+@pytest.mark.parametrize('arguments, code', [
+    ({'item_ids': ['MLB1']}, 'RULE_MISSING'),
+    ({'item_ids': ['MLB1'], 'rule': 'shuffle'}, 'RULE_INVALID'),
+    ({'item_ids': ['MLB1'], 'rule': 'last'}, 'RULE_INVALID'),
+    ({'item_ids': ['MLB1'], 'rule': 'cover'}, 'RULE_INVALID'),
+    ({'item_ids': ['MLB1'], 'rule': 'cover', 'position': 1, 'picture_id': 'P1'}, 'RULE_INVALID'),
+    ({'item_ids': ['MLB1'], 'rule': 'cover', 'position': 0}, 'RULE_INVALID'),
+    ({'item_ids': ['MLB1'], 'rule': 'order', 'order': ['P1', 'P1', 'P2']}, 'RULE_INVALID'),
+    ({'item_ids': ['MLB1'], 'titles': ['x'], 'rule': 'cover', 'position': 2}, 'ITEMS_AMBIGUOUS'),
+    ({'rule': 'cover', 'position': 2}, 'TITLES_MISSING'),
+])
+async def test_reorder_refusals(seller, arguments, code):
+    result = await call('reorder_pictures', {**arguments, 'apply': True})
+    assert result.is_error and result.structured_content['code'] == code, result.content
+    assert puts(seller) == []

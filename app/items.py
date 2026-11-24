@@ -7,6 +7,7 @@ the items a workbook created, by family title, and fix what the seller asks:
 - ``find_items``: the seller's items whose family title is one of the titles.
 - ``free_shipping``: turn on free shipping, skipping items already on.
 - ``fill_attributes``: write attributes only where the item has no value.
+- ``reorder_pictures``: change the picture order (e.g. size chart last), read back to confirm.
 - ``video_links``: one video upload link per family.
 - ``stats``: visits and sales per item and per family (read only).
 
@@ -215,6 +216,97 @@ def fill_attributes(ml: MercadoLibre, item_ids: List[str], attributes: Dict[str,
         if still:
             raise ItemError(f'Still empty after the change: {", ".join(sorted(still))}.')
         return {'id': item_id, 'state': 'changed', 'attributes': sorted(missing)}
+    return _finish(ml.each(lambda i: _state(one, i), item_ids), apply)
+
+
+PICTURE_RULES = ('last', 'cover', 'order')
+
+
+def picture_rule(rule: Optional[str], picture_id: Optional[str] = None, position: Optional[int] = None,
+                 order: Optional[List[str]] = None,
+                 append: Optional[str] = None) -> Callable[[List[str]], List[str]]:
+    """Check the rule once and return how it turns one item's picture ids into the new order.
+
+    ``append`` (a picture already uploaded to the account) goes to the end of items without it,
+    before the rule runs. The returned function raises ItemError when the rule does not fit the item.
+    """
+    rule = (rule or '').strip().lower() or None
+    picture_id = str(picture_id).strip() if picture_id not in (None, '') else None
+    append = str(append).strip() if append not in (None, '') else None
+    if rule is None and append is None:
+        raise MarketplaceError('Pass a rule ("last", "cover" or "order") or append.', 'RULE_MISSING')
+    if rule is not None and rule not in PICTURE_RULES:
+        raise MarketplaceError(f'Unknown rule "{rule}": use "last", "cover" or "order".', 'RULE_INVALID')
+    if rule == 'last' and not picture_id:
+        raise MarketplaceError('rule "last" needs picture_id: the picture to send to the end.', 'RULE_INVALID')
+    if rule == 'cover' and (picture_id is None) == (position is None):
+        raise MarketplaceError('rule "cover" needs picture_id or position (1 = current cover), not both.',
+                               'RULE_INVALID')
+    if rule == 'cover' and position is not None and (not isinstance(position, int) or position < 1):
+        raise MarketplaceError('position counts from 1 (the current cover).', 'RULE_INVALID')
+    wanted = [str(p).strip() for p in order or [] if str(p).strip()]
+    if rule == 'order' and not wanted:
+        raise MarketplaceError('rule "order" needs order: every picture id of the item, in the new order.',
+                               'RULE_INVALID')
+    if len(set(wanted)) != len(wanted):
+        raise MarketplaceError('order repeats a picture id.', 'RULE_INVALID')
+
+    def arrange(current: List[str]) -> List[str]:
+        pictures = list(current)
+        if append and append not in pictures:
+            pictures.append(append)
+        if rule == 'last':
+            if picture_id not in pictures:
+                raise ItemError(f'Picture {picture_id} is not on this item.')
+            pictures = [p for p in pictures if p != picture_id] + [picture_id]
+        elif rule == 'cover':
+            if position is not None:
+                if position > len(pictures):
+                    raise ItemError(f'The item has {len(pictures)} pictures, no picture {position}.')
+                chosen = pictures[position - 1]
+            elif picture_id in pictures:
+                chosen = picture_id
+            else:
+                raise ItemError(f'Picture {picture_id} is not on this item.')
+            pictures = [chosen] + [p for p in pictures if p != chosen]
+        elif rule == 'order':
+            missing = [p for p in pictures if p not in wanted]
+            extra = [p for p in wanted if p not in pictures]
+            if missing or extra:
+                parts = ([f'missing from order: {", ".join(missing)}'] if missing else []) + (
+                    [f'not on the item: {", ".join(extra)}'] if extra else [])
+                raise ItemError(f'order does not match the item pictures ({"; ".join(parts)}).')
+            pictures = list(wanted)
+        return pictures
+    return arrange
+
+
+def reorder_pictures(ml: MercadoLibre, item_ids: List[str], arrange: Callable[[List[str]], List[str]],
+                     apply: bool) -> Dict[str, Any]:
+    """Change the picture order of published items; with ``apply`` each one is read back to confirm.
+
+    Only ``pictures`` is sent (by id), so price, stock and title stay as they are. An item counts
+    as changed only when its pictures read back in exactly the new order.
+    """
+    def pictures(item_id: str) -> List[str]:
+        item = ml.item(item_id, 'id,pictures,variations')
+        if item.get('variations'):
+            raise ItemError('The item has variations; their pictures are not reordered here.')
+        return [str(p.get('id')) for p in item.get('pictures') or [] if isinstance(p, dict) and p.get('id')]
+
+    def one(item_id: str) -> Dict[str, Any]:
+        before = pictures(item_id)
+        after = arrange(before)
+        if after == before:
+            return {'id': item_id, 'state': 'already'}
+        if not apply:
+            return {'id': item_id, 'state': 'would_change', 'before': before, 'after': after}
+        ml.call('PUT', f'/items/{quote(item_id)}', {'pictures': [{'id': p} for p in after]})
+        now = pictures(item_id)
+        if now != after:
+            raise ItemError(f'Mercado Libre accepted the change but the pictures read back as '
+                            f'{", ".join(now) or "none"}, not in the new order.')
+        return {'id': item_id, 'state': 'changed', 'before': before, 'after': after}
     return _finish(ml.each(lambda i: _state(one, i), item_ids), apply)
 
 
