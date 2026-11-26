@@ -19,10 +19,18 @@ def anyio_backend():
     return 'asyncio'
 
 
-def item(item_id, family, free=False, attributes=(), product='UP1', status='active', pictures=('P1', 'P2', 'P3')):
+WARRANTY = [
+    {'id': 'WARRANTY_TYPE', 'value_id': '2230280', 'value_name': 'Garantia do vendedor', 'value_struct': None},
+    {'id': 'WARRANTY_TIME', 'value_id': None, 'value_name': '90 dias', 'value_struct': {'number': 90, 'unit': 'dias'}},
+]
+
+
+def item(item_id, family, free=False, attributes=(), product='UP1', status='active', pictures=('P1', 'P2', 'P3'),
+         sale_terms=WARRANTY, logistic='xd_drop_off'):
     return {'id': item_id, 'family_name': family, 'status': status, 'user_product_id': product,
             'pictures': [{'id': p, 'url': f'http://img/{p}.jpg'} for p in pictures],
-            'shipping': {'free_shipping': free, 'mode': 'me2'},
+            'shipping': {'free_shipping': free, 'mode': 'me2', 'logistic_type': logistic},
+            'sale_terms': list(sale_terms),
             'attributes': [{'id': k, 'value_name': v} for k, v in attributes]}
 
 
@@ -43,6 +51,7 @@ class FakeSeller:
         self.calls = []
         self.status = {}
         self.ignore_pictures = set()
+        self.ignore_terms = set()
 
     def __call__(self, method, url, headers=None, json=None, timeout=None):
         assert headers['Authorization'] == f'Bearer {TOKEN}'
@@ -70,6 +79,20 @@ class FakeSeller:
             if 'shipping' in json:
                 target['shipping'].update(json['shipping'])
             target['attributes'].extend(json.get('attributes', []))
+            if 'sale_terms' in json and target['id'] not in self.ignore_terms:
+                terms = []
+                for term in json['sale_terms']:  # Mercado Libre answers number_unit terms with a struct
+                    name = term.get('value_name')
+                    if term.get('value_id') is None and not name:
+                        continue
+                    old = next((t for t in target['sale_terms'] if t['id'] == term['id']), {})
+                    struct = None
+                    if name and not term.get('value_id'):
+                        number, unit = name.split()
+                        struct = {'number': int(number), 'unit': unit}
+                    terms.append({'id': term['id'], 'value_id': term.get('value_id'),
+                                  'value_name': name or old.get('value_name'), 'value_struct': struct})
+                target['sale_terms'] = terms
             if 'pictures' in json and target['id'] not in self.ignore_pictures:
                 target['pictures'] = [{'id': p['id'], 'url': f"http://img/{p['id']}.jpg"} for p in json['pictures']]
         return Response(200, copy.deepcopy(target))
@@ -185,7 +208,84 @@ async def test_missing_and_rejected_token(seller, monkeypatch):
     assert TOKEN not in result.content[0].text
 
 
+TWO_DAYS = {'id': 'MANUFACTURING_TIME', 'value_id': None, 'value_name': '2 dias',
+            'value_struct': {'number': 2, 'unit': 'dias'}}
+ONE_DAY = dict(TWO_DAYS, value_name='1 dias', value_struct={'number': 1, 'unit': 'dias'})
+
+
+@pytest.fixture
+def factory(monkeypatch, tmp_path):
+    fake = FakeSeller([
+        item('MLB1', 'Camiseta Infantil Dino Xp Preta'),
+        item('MLB2', 'Camiseta Infantil Dino Xp Preta', sale_terms=WARRANTY + [TWO_DAYS]),
+        item('MLB3', 'Camiseta Infantil Gato Branca', sale_terms=WARRANTY + [ONE_DAY]),
+        item('MLB4', 'Camiseta Infantil Gato Branca', logistic='fulfillment'),
+    ])
+    previous = bind_items_transport(fake)
+    monkeypatch.setenv('ML_ACCESS_TOKEN', TOKEN)
+    monkeypatch.setenv('MLAM_WORKDIR', str(tmp_path))
+    yield fake
+    bind_items_transport(previous)
+
+
+def days_of(fake, item_id):
+    terms = {t['id']: t for t in fake.items[item_id]['sale_terms']}
+    return terms.get('MANUFACTURING_TIME', {}).get('value_name')
+
+
+async def test_manufacturing_time_previews_then_applies_keeping_the_warranty(factory):
+    ids = ['MLB1', 'MLB2', 'MLB3', 'MLB4']
+    result = await call('set_manufacturing_time', {'item_ids': ids, 'days': 1})
+    assert not result.is_error, result.content
+    body = result.structured_content
+    assert body['applied'] is False and body['already'] == ['MLB3']
+    assert body['would_change'] == [{'id': 'MLB1', 'before': 0, 'after': 1},
+                                    {'id': 'MLB2', 'before': 2, 'after': 1}]
+    assert body['failed'][0]['id'] == 'MLB4' and 'Full' in body['failed'][0]['error']
+    assert puts(factory) == []
+
+    result = await call('set_manufacturing_time', {'item_ids': ids, 'days': 1, 'apply': True})
+    body = result.structured_content
+    assert body['counts'] == {'changed': 2, 'would_change': 0, 'already': 1, 'failed': 1}
+    assert [days_of(factory, i) for i in ids] == ['1 dias', '1 dias', '1 dias', None]
+    assert puts(factory)[0][2] == {'sale_terms': [
+        {'id': 'WARRANTY_TYPE', 'value_id': '2230280'}, {'id': 'WARRANTY_TIME', 'value_name': '90 dias'},
+        {'id': 'MANUFACTURING_TIME', 'value_name': '1 dias'}]}
+    for item_id in ('MLB1', 'MLB2'):
+        terms = {t['id']: t for t in factory.items[item_id]['sale_terms']}
+        assert terms['WARRANTY_TYPE']['value_id'] == '2230280' and terms['WARRANTY_TIME']['value_name'] == '90 dias'
+
+    again = await call('set_manufacturing_time', {'item_ids': ids[:3], 'days': 1, 'apply': True})
+    assert again.structured_content['already'] == ['MLB1', 'MLB2', 'MLB3']
+
+
+async def test_manufacturing_time_zero_removes_it(factory):
+    result = await call('set_manufacturing_time', {'item_ids': ['MLB1', 'MLB2'], 'days': 0, 'apply': True})
+    body = result.structured_content
+    assert body['already'] == ['MLB1'] and body['changed'] == [{'id': 'MLB2', 'before': 2, 'after': 0}]
+    assert days_of(factory, 'MLB2') is None
+    assert puts(factory)[0][2]['sale_terms'][-1] == {'id': 'MANUFACTURING_TIME', 'value_name': None}
+
+
+async def test_manufacturing_time_by_title_and_read_back_mismatch(factory):
+    factory.ignore_terms.add('MLB1')
+    result = await call('set_manufacturing_time', {'titles': ['camiseta infantil dino xp preta'], 'days': 1,
+                                                   'apply': True})
+    body = result.structured_content
+    assert body['changed'] == [{'id': 'MLB2', 'before': 2, 'after': 1}]
+    assert body['failed'][0]['id'] == 'MLB1' and 'reads back with 0 days' in body['failed'][0]['error']
+
+
+@pytest.mark.parametrize('days', [-1, 31, 1.5])
+async def test_manufacturing_time_refuses_bad_days(factory, days):
+    result = await call('set_manufacturing_time', {'item_ids': ['MLB1'], 'days': days, 'apply': True})
+    assert result.is_error, result.content
+    assert puts(factory) == []
+
+
 @pytest.mark.parametrize('name, arguments, code', [
+    ('set_manufacturing_time', {'item_ids': ['MLB1'], 'days': 31}, 'DAYS_INVALID'),
+    ('set_manufacturing_time', {'item_ids': ['MLB1'], 'titles': ['x'], 'days': 1}, 'ITEMS_AMBIGUOUS'),
     ('set_free_shipping', {'item_ids': [' ', '']}, 'ITEMS_MISSING'),
     ('fill_attributes', {'item_ids': ['MLB1'], 'attributes': {}}, 'ATTRIBUTES_MISSING'),
     ('find_listings', {}, 'TITLES_MISSING'),

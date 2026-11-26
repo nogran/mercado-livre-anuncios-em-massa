@@ -42,7 +42,8 @@ server = MCPServer(
         'set_free_shipping and fill_attributes (preview first; apply: true only after the seller agrees) and '
         'video_upload_links. reorder_pictures changes the picture order of published items (size chart last, '
         'a new cover, an explicit order, or append a picture already in the account), also preview first and '
-        'apply: true only after the seller agrees. listing_stats reads visits and sales per item and per family.'
+        'apply: true only after the seller agrees. set_manufacturing_time sets the days before shipping '
+        '(0 removes them), same preview and apply. listing_stats reads visits and sales per item and per family.'
     ),
 )
 
@@ -536,6 +537,37 @@ def reorder_pictures(rule: Optional[str] = None, item_ids: Optional[List[str]] =
             wanted, _ = _titles(titles, rows_path)
             ids = listings.clean_ids(listings.find_items(seller, wanted, search_terms)['item_ids'])
         return listings.reorder_pictures(seller, ids, arrange, apply)
+    return _answer(run)
+
+
+@server.tool(
+    title='Set manufacturing time',
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                                open_world_hint=True),
+)
+def set_manufacturing_time(days: int, item_ids: Optional[List[str]] = None, titles: Optional[List[str]] = None,
+                           rows_path: Optional[str] = None, search_terms: Optional[List[str]] = None,
+                           apply: bool = False) -> Changes:
+    """Set the manufacturing time ("Disponibilidade de estoque") of published items, in days.
+
+    ``days`` from 1 to 30 adds that many days before shipping to the delivery promise; 0 removes
+    it. Items: ``item_ids``, or ``titles`` / ``rows_path`` (with ``search_terms``) found as in
+    find_listings. Without ``apply`` nothing changes: ``would_change`` shows ``before`` and
+    ``after`` days per item. Repeat with ``apply: true`` only after the seller agrees; each item
+    is read back. The warranty is kept; items in Full are refused. Never touches price, stock or
+    title. Uses the token in ML_ACCESS_TOKEN.
+    """
+    def run() -> Dict[str, Any]:
+        wanted_days = listings.manufacturing_days(days)
+        seller = _seller()
+        if item_ids:
+            if titles or rows_path:
+                raise ToolFailure('ITEMS_AMBIGUOUS', 'Pass item_ids, titles or rows_path, only one.')
+            ids = listings.clean_ids(item_ids)
+        else:
+            wanted, _ = _titles(titles, rows_path)
+            ids = listings.clean_ids(listings.find_items(seller, wanted, search_terms)['item_ids'])
+        return listings.manufacturing_time(seller, ids, wanted_days, apply)
     return _answer(run)
 
 
