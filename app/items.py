@@ -8,6 +8,7 @@ the items a workbook created, by family title, and fix what the seller asks:
 - ``free_shipping``: turn on free shipping, skipping items already on.
 - ``fill_attributes``: write attributes only where the item has no value.
 - ``reorder_pictures``: change the picture order (e.g. size chart last), read back to confirm.
+- ``manufacturing_time``: set the manufacturing time in days (0 removes it), read back to confirm.
 - ``video_links``: one video upload link per family.
 - ``stats``: visits and sales per item and per family (read only).
 
@@ -307,6 +308,74 @@ def reorder_pictures(ml: MercadoLibre, item_ids: List[str], arrange: Callable[[L
             raise ItemError(f'Mercado Libre accepted the change but the pictures read back as '
                             f'{", ".join(now) or "none"}, not in the new order.')
         return {'id': item_id, 'state': 'changed', 'before': before, 'after': after}
+    return _finish(ml.each(lambda i: _state(one, i), item_ids), apply)
+
+
+MANUFACTURING = 'MANUFACTURING_TIME'
+MAX_MANUFACTURING_DAYS = 30
+
+
+def manufacturing_days(days: Any) -> int:
+    """Check the wanted manufacturing time once: whole days, 0 (removes it) to 30."""
+    if isinstance(days, bool) or not isinstance(days, int) or not 0 <= days <= MAX_MANUFACTURING_DAYS:
+        raise MarketplaceError(f'days must be a whole number from 0 (no manufacturing time) to '
+                               f'{MAX_MANUFACTURING_DAYS}.', 'DAYS_INVALID')
+    return days
+
+
+def _term_days(term: Dict[str, Any]) -> int:
+    """Days of a MANUFACTURING_TIME sale term ("2 dias" or its value_struct); 0 when empty."""
+    number = (term.get('value_struct') or {}).get('number')
+    if number is None:
+        words = str(term.get('value_name') or '').split()
+        number = words[0] if words else 0
+    try:
+        return int(float(number))
+    except (TypeError, ValueError):
+        raise ItemError(f'Unreadable manufacturing time "{term.get("value_name")}".')
+
+
+def _term_body(term: Dict[str, Any]) -> Dict[str, Any]:
+    """A sale term as Mercado Libre takes it back: the value id for lists, else the value name."""
+    if term.get('value_id'):
+        return {'id': term['id'], 'value_id': term['value_id']}
+    return {'id': term['id'], 'value_name': term.get('value_name')}
+
+
+def manufacturing_time(ml: MercadoLibre, item_ids: List[str], days: int, apply: bool) -> Dict[str, Any]:
+    """Set the manufacturing time (``MANUFACTURING_TIME``, "Disponibilidade de estoque") in days.
+
+    ``days`` 0 removes it. The other sale terms (warranty) are sent back as they are, so the
+    PUT cannot drop them. Items in Mercado Libre Full are refused (they ship from stock).
+    With ``apply`` each item is read back and counts as changed only if it shows the new days.
+    """
+    days = manufacturing_days(days)
+
+    def read(item_id: str) -> Dict[str, Any]:
+        return ml.item(item_id, 'id,sale_terms,shipping')
+
+    def current(item: Dict[str, Any]) -> int:
+        terms = [t for t in item.get('sale_terms') or [] if isinstance(t, dict) and t.get('id') == MANUFACTURING]
+        return _term_days(terms[0]) if terms else 0
+
+    def one(item_id: str) -> Dict[str, Any]:
+        item = read(item_id)
+        before = current(item)
+        if before == days:
+            return {'id': item_id, 'state': 'already'}
+        if (item.get('shipping') or {}).get('logistic_type') == 'fulfillment':
+            raise ItemError('The item is in Mercado Libre Full; it takes no manufacturing time.')
+        if not apply:
+            return {'id': item_id, 'state': 'would_change', 'before': before, 'after': days}
+        terms = [_term_body(t) for t in item.get('sale_terms') or []
+                 if isinstance(t, dict) and t.get('id') and t.get('id') != MANUFACTURING]
+        terms.append({'id': MANUFACTURING, 'value_name': f'{days} dias' if days else None})
+        ml.call('PUT', f'/items/{quote(item_id)}', {'sale_terms': terms})
+        now = current(read(item_id))
+        if now != days:
+            raise ItemError(f'Mercado Libre accepted the change but the item reads back with {now} days, '
+                            f'not {days}.')
+        return {'id': item_id, 'state': 'changed', 'before': before, 'after': days}
     return _finish(ml.each(lambda i: _state(one, i), item_ids), apply)
 
 
